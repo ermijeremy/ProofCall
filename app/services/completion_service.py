@@ -68,7 +68,7 @@ def process_completed_call(
 
     extracted = active_engine.extract_evidence(transcript, call.worker_id)
     evaluated: WorkerEvidenceResult = active_engine.evaluate_clauses(extracted)
-    evaluated = active_engine.compare_with_employer(evaluated, employer)
+    evaluated = active_engine.compare_with_employer(evaluated, beneficiary)
     result = CompletedCallResult(
         worker_id=call.worker_id,
         call_id=call.call_id,

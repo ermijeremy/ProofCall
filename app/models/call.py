@@ -20,6 +20,7 @@ class TeleExpertCall(Base):
     response_format: Mapped[str] = mapped_column(String(20), default="both", nullable=False)
     retries: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
     retry_delay_seconds: Mapped[int] = mapped_column(Integer, default=30, nullable=False)
+    answer_timeout_seconds: Mapped[int] = mapped_column(Integer, default=45, nullable=False)
     status: Mapped[str] = mapped_column(String(30), default="queued", nullable=False, index=True)
     transcript: Mapped[Any] = mapped_column(Text, nullable=True)
     transcript_turns: Mapped[Any] = mapped_column(JSON, nullable=True)

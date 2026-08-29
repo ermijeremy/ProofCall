@@ -6,6 +6,7 @@ from app.models.campaign import Campaign, CampaignWorker
 from app.models.employer import Employer
 from app.models.evidence import WorkerEvidence
 from app.models.interview import InterviewSchedule
+from app.models.webhook import TeleExpertWebhookEvent
 
 __all__ = [
     "Beneficiary",
@@ -15,4 +16,5 @@ __all__ = [
     "TeleExpertCall",
     "WorkerEvidence",
     "InterviewSchedule",
+    "TeleExpertWebhookEvent",
 ]

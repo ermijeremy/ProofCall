@@ -4,7 +4,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-CallStatus = Literal["queued", "dialing", "retry_wait", "in_progress", "completed", "failed", "cancelled"]
+CallStatus = Literal[
+    "queued", "dispatching", "dialing", "retry_wait", "in_progress",
+    "completed", "failed", "cancelled",
+]
 
 
 class CallCreate(BaseModel):
@@ -15,6 +18,7 @@ class CallCreate(BaseModel):
     response_format: str = "both"
     retries: int = Field(default=2, ge=0)
     retry_delay_seconds: int = Field(default=30, ge=0)
+    answer_timeout_seconds: int = Field(default=45, ge=1)
 
 
 class CallStatusRead(BaseModel):
@@ -29,5 +33,6 @@ class CallStatusRead(BaseModel):
     completed_at: object | None = None
     retries: int = 0
     retry_delay_seconds: int = 0
+    answer_timeout_seconds: int = 45
     audio_url: str | None = None
     failure_reason: str | None = None

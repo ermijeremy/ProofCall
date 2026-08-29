@@ -11,6 +11,7 @@ class InterviewScheduleCreate(BaseModel):
     campaign_id: str | None = Field(default=None, max_length=100)
     retries: int = Field(default=2, ge=0, le=10)
     retry_delay_seconds: int = Field(default=30, ge=0)
+    answer_timeout_seconds: int = Field(default=45, ge=1)
 
 
 class InterviewScheduleRead(BaseModel):
@@ -25,6 +26,7 @@ class InterviewScheduleRead(BaseModel):
     call_id: str | None = None
     retries: int
     retry_delay_seconds: int
+    answer_timeout_seconds: int
     failure_reason: str | None = None
     created_at: datetime
 

@@ -43,6 +43,7 @@ def schedule_interviews(db: Session, data: InterviewScheduleCreate) -> list[Inte
                 language=language,
                 retries=data.retries,
                 retry_delay_seconds=data.retry_delay_seconds,
+                answer_timeout_seconds=data.answer_timeout_seconds,
             )
         )
 
@@ -105,6 +106,7 @@ def run_due_interviews(
                     prompt=prompt,
                     retries=schedule.retries,
                     retry_delay_seconds=schedule.retry_delay_seconds,
+                    answer_timeout_seconds=schedule.answer_timeout_seconds,
                 ),
             )
             schedule.status = "submitted"

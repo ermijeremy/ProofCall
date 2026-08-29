@@ -21,6 +21,7 @@ class InterviewSchedule(Base):
     call_id: Mapped[Any] = mapped_column(ForeignKey("teleexpert_calls.call_id"), nullable=True)
     retries: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
     retry_delay_seconds: Mapped[int] = mapped_column(Integer, default=30, nullable=False)
+    answer_timeout_seconds: Mapped[int] = mapped_column(Integer, default=45, nullable=False)
     failure_reason: Mapped[Any] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

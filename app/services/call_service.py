@@ -11,6 +11,7 @@ from app.models.call import TeleExpertCall
 from app.repositories.beneficiaries import BeneficiaryRepository
 from app.repositories.calls import CallRepository
 from app.schemas.call import CallCreate
+from app.services.teleexpert_service import result_values, transcript_from_turns
 
 
 def submit_teleexpert_call(
@@ -29,6 +30,9 @@ def submit_teleexpert_call(
             response_format=data.response_format,
             retries=data.retries,
             retry_delay_seconds=data.retry_delay_seconds,
+            answer_timeout_seconds=data.answer_timeout_seconds,
+            webhook_url=settings.teleexpert_webhook_url or None,
+            webhook_secret=settings.teleexpert_webhook_secret or None,
         )
     except TeleExpertError:
         if settings.teleexpert_base_url:
@@ -45,6 +49,7 @@ def submit_teleexpert_call(
         response_format=data.response_format,
         retries=data.retries,
         retry_delay_seconds=data.retry_delay_seconds,
+        answer_timeout_seconds=data.answer_timeout_seconds,
         status=response.get("status", "queued"),
     )
     return CallRepository(db).add(call)
@@ -58,15 +63,15 @@ def sync_call_status(db: Session, call_id: str, client: TeleExpertClient | None 
     if call.call_id.startswith("demo_call_") and client is None:
         return call
 
-    response = (client or TeleExpertClient()).get_call(call.call_id)
-    values = {
-        "status": response.get("status", call.status),
-        "transcript": response.get("transcript", call.transcript),
-        "transcript_turns": response.get("transcript_turns", call.transcript_turns),
-        "language": response.get("language", call.language),
-        "audio_url": response.get("audio_url", call.audio_url),
-        "failure_reason": response.get("failure_reason", call.failure_reason),
-    }
+    client = client or TeleExpertClient()
+    response = client.get_call(call.call_id)
+    values = result_values(response, call)
+    if values["status"] == "completed" and not values["transcript_turns"] and not values["transcript"]:
+        transcript_payload = client.get_transcript(call.call_id)
+        values["transcript_turns"] = transcript_payload.get("turns", [])
+        values["transcript"] = transcript_from_turns(values["transcript_turns"])
+    if values["audio_url"]:
+        values["audio_url"] = client.absolute_url(values["audio_url"])
     if values["status"] == "completed" and call.completed_at is None:
         values["completed_at"] = datetime.utcnow()
     return repository.update(call, values)

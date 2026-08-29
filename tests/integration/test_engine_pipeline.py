@@ -375,34 +375,18 @@ def test_an_unknown_transcript_cannot_produce_a_confirmation(db: Session) -> Non
 
 
 # --------------------------------------------------------------------------- #
-# Known wiring defect: the employer object passed to compare_with_employer
+# Worker-specific employer-claim comparison
 # --------------------------------------------------------------------------- #
 
 
-def test_defect_employment_status_contradiction_is_missed_as_currently_wired(
+def test_employment_status_contradiction_is_detected_from_beneficiary_claim(
     db: Session, engine: CallProofEngine
 ) -> None:
-    """DEFECT, not desired behaviour. Asserts what the code does today.
-
-    ``process_completed_call`` passes the company-level ``Employer`` row to
-    ``compare_with_employer`` (app/services/completion_service.py:71). The
-    per-worker claim ``currently_employed`` lives on
-    ``Beneficiary.employer_claims`` (app/models/beneficiary.py:19) and does not
-    exist on ``Employer`` at all, so the employment-status contradiction cannot
-    be detected. W015 says they left the job two months ago and the employer
-    reports them as employed; the dashboard shows no such finding.
-
-    The salary comparison only appears to work because
-    ``Employer.average_salary`` happens to equal every seeded worker's claim.
-
-    Change the argument to ``beneficiary`` and this test flips — which is the
-    point of writing it down.
-    """
+    """Worker-specific employment and salary claims are compared correctly."""
 
     result = _process(db, engine, "employment_status_contradiction")
     types = [item.type for item in result.contradictions]
-    assert "employment_status" not in types, "fixed? then update this test and delete the defect note"
-    assert types == ["salary"]
+    assert types == ["employment_status", "salary"]
 
 
 def test_passing_the_beneficiary_finds_the_employment_status_contradiction(
@@ -426,19 +410,13 @@ def test_passing_the_beneficiary_finds_the_employment_status_contradiction(
     assert [item.type for item in evaluated.contradictions] == ["employment_status", "salary"]
 
 
-def test_defect_costs_the_dashboard_one_material_contradiction(
+def test_dashboard_counts_worker_material_contradictions(
     db: Session, engine: CallProofEngine
 ) -> None:
-    """Quantifies the defect in the number the dashboard actually shows.
-
-    ``_counts`` in the aggregation counts *workers* carrying at least one
-    material contradiction. As wired, these fixtures yield 1 (W002's salary
-    gap). With the beneficiary passed instead, they yield 2 — W015's employment
-    status is the missing one.
-    """
+    """Aggregation counts workers carrying at least one material contradiction."""
 
     _process_all(db, engine)
-    assert aggregate_company(db, COMPANY_ID)["material_contradictions"] == 1
+    assert aggregate_company(db, COMPANY_ID)["material_contradictions"] == 2
 
     fixture = FIXTURES["employment_status_contradiction"]
     beneficiary = BeneficiaryRepository(db).get(fixture["worker_id"])
