@@ -1,0 +1,79 @@
+{
+  "fixture": "salary_contradiction",
+  "description": "Every required condition is met, but the worker-stated salary is roughly half the employer's reported figure. Demonstrates that a material contradiction is independent of the good-job verdict: the job qualifies, the employer's number does not survive verification.",
+  "worker_id": "W002",
+  "call_id": "fixture-W002",
+  "language": "en",
+  "employer_claims": {"currently_employed": true, "salary": 8500},
+  "transcript": "Interviewer: Good afternoon. I am calling from an independent team that reviews working conditions at ABC Construction. I do not work for the company, and your answers will not be reported back to them against your name. May I ask you a few questions?\nWorker: Yes, you can ask.\nInterviewer: Thank you. First, how old are you?\nWorker: I am twenty seven.\nInterviewer: Are you working at ABC Construction at the moment?\nWorker: Yes, I work there now.\nInterviewer: How long have you been working there?\nWorker: It has been about eleven months.\nInterviewer: In a normal week, how many days do you work, and about how many hours each day?\nWorker: Six days, roughly eight hours a day.\nInterviewer: What do you take home in a normal month?\nWorker: Four thousand two hundred birr.\nInterviewer: I want to make sure I have that right. Is four thousand two hundred what actually reaches you in a normal month, after any deductions?\nWorker: Yes, four thousand two hundred is what I receive.\nInterviewer: Has the company provided any training?\nWorker: Yes, there was a safety induction when I joined.\nInterviewer: Are you able to leave the job if you choose to, and do you hold your own identity documents?\nWorker: No, I am free to go. I hold my own documents.\nInterviewer: Have you been treated worse than other workers for any personal reason?\nWorker: No, nothing like that.\nInterviewer: Is there a workers' association, and can you join it if you want?\nWorker: There is an association. I am not stopped from joining.\nInterviewer: That is all I wanted to ask. Thank you for your time.",
+  "transcript_turns": [
+    {"speaker": "interviewer", "text": "Good afternoon. I am calling from an independent team that reviews working conditions at ABC Construction. I do not work for the company, and your answers will not be reported back to them against your name. May I ask you a few questions?"},
+    {"speaker": "worker", "text": "Yes, you can ask."},
+    {"speaker": "interviewer", "text": "Thank you. First, how old are you?"},
+    {"speaker": "worker", "text": "I am twenty seven."},
+    {"speaker": "interviewer", "text": "Are you working at ABC Construction at the moment?"},
+    {"speaker": "worker", "text": "Yes, I work there now."},
+    {"speaker": "interviewer", "text": "How long have you been working there?"},
+    {"speaker": "worker", "text": "It has been about eleven months."},
+    {"speaker": "interviewer", "text": "In a normal week, how many days do you work, and about how many hours each day?"},
+    {"speaker": "worker", "text": "Six days, roughly eight hours a day."},
+    {"speaker": "interviewer", "text": "What do you take home in a normal month?"},
+    {"speaker": "worker", "text": "Four thousand two hundred birr."},
+    {"speaker": "interviewer", "text": "I want to make sure I have that right. Is four thousand two hundred what actually reaches you in a normal month, after any deductions?"},
+    {"speaker": "worker", "text": "Yes, four thousand two hundred is what I receive."},
+    {"speaker": "interviewer", "text": "Has the company provided any training?"},
+    {"speaker": "worker", "text": "Yes, there was a safety induction when I joined."},
+    {"speaker": "interviewer", "text": "Are you able to leave the job if you choose to, and do you hold your own identity documents?"},
+    {"speaker": "worker", "text": "No, I am free to go. I hold my own documents."},
+    {"speaker": "interviewer", "text": "Have you been treated worse than other workers for any personal reason?"},
+    {"speaker": "worker", "text": "No, nothing like that."},
+    {"speaker": "interviewer", "text": "Is there a workers' association, and can you join it if you want?"},
+    {"speaker": "worker", "text": "There is an association. I am not stopped from joining."},
+    {"speaker": "interviewer", "text": "That is all I wanted to ask. Thank you for your time."}
+  ],
+  "expected_extraction": {
+    "worker_id": "W002",
+    "consent": true,
+    "language": "en",
+    "interview_stopped": false,
+    "facts": {
+      "age_years": {"value": 27, "state": "STATED", "confidence": "HIGH", "evidence": "I am twenty seven."},
+      "currently_employed": {"value": true, "state": "STATED", "confidence": "HIGH", "evidence": "Yes, I work there now."},
+      "employment_duration_months": {"value": 11, "state": "STATED", "confidence": "HIGH", "evidence": "It has been about eleven months."},
+      "working_days_per_week": {"value": 6, "state": "STATED", "confidence": "HIGH", "evidence": "Six days, roughly eight hours a day."},
+      "working_hours_per_day": {"value": 8, "state": "STATED", "confidence": "HIGH", "evidence": "Six days, roughly eight hours a day."},
+      "salary_amount": {"value": 4200, "state": "STATED", "confidence": "HIGH", "evidence": "Yes, four thousand two hundred is what I receive."},
+      "training_participation": {"value": true, "state": "STATED", "confidence": "HIGH", "evidence": "Yes, there was a safety induction when I joined."},
+      "forced_labour_present": {"value": false, "state": "STATED", "confidence": "HIGH", "evidence": "No, I am free to go. I hold my own documents."},
+      "discrimination_present": {"value": false, "state": "STATED", "confidence": "HIGH", "evidence": "No, nothing like that."},
+      "freedom_of_association_restricted": {"value": false, "state": "STATED", "confidence": "HIGH", "evidence": "There is an association. I am not stopped from joining."}
+    }
+  },
+  "expected_result": {
+    "worker_id": "W002",
+    "consent": true,
+    "safeguarding_flag": false,
+    "overall_verdict": "CONFIRMED_GOOD_JOB",
+    "clauses": {
+      "age": {"value": 27, "status": "MET", "confidence": "HIGH", "evidence": "I am twenty seven."},
+      "employment_status": {"value": true, "status": "MET", "confidence": "HIGH", "evidence": "Yes, I work there now."},
+      "employment_duration": {"value": 11, "status": "MET", "confidence": "HIGH", "evidence": "It has been about eleven months."},
+      "working_hours": {"value": 48, "status": "MET", "confidence": "HIGH", "evidence": "Six days, roughly eight hours a day."},
+      "salary": {"value": 4200, "status": "MET", "confidence": "HIGH", "evidence": "Yes, four thousand two hundred is what I receive."},
+      "forced_labour": {"value": false, "status": "MET", "confidence": "HIGH", "evidence": "No, I am free to go. I hold my own documents."},
+      "discrimination": {"value": false, "status": "MET", "confidence": "HIGH", "evidence": "No, nothing like that."},
+      "freedom_of_association": {"value": false, "status": "MET", "confidence": "HIGH", "evidence": "There is an association. I am not stopped from joining."},
+      "training_participation": {"value": true, "status": "MET", "confidence": "HIGH", "evidence": "Yes, there was a safety induction when I joined."}
+    },
+    "contradictions": [
+      {
+        "type": "salary",
+        "description": "Employer reports a salary of 8500 for this worker; the worker states 4200, 50.6% below the employer figure. Recorded as material because the gap exceeds the 10% tolerance. CallProof does not adjudicate which figure is correct.",
+        "material": true,
+        "employer_value": 8500,
+        "worker_value": 4200,
+        "evidence": "Yes, four thousand two hundred is what I receive."
+      }
+    ]
+  }
+}
