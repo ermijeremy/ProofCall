@@ -4,3 +4,8 @@ __pycache__/
 .venv/
 *.db
 *.db-journal
+
+# Secrets. GEMINI_API_KEY holds live Google API keys; never commit them.
+.env
+.env.*
+!.env.example

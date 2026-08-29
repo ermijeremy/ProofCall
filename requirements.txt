@@ -5,4 +5,19 @@ pydantic==2.9.2
 python-multipart==0.0.9
 jinja2==3.1.4
 pytest==8.3.3
-httpx==0.27.2
+# Raised from 0.27.2: every google-genai release requires httpx>=0.28.1, so the
+# old pin made the intelligence dependency uninstallable. Nothing here relies on
+# what 0.28 removed: tests/integration/test_api_surface.py drives the app through
+# httpx.ASGITransport, and TeleExpertClient constructs httpx.Client with only
+# base_url/timeout/headers. Both pass on 0.28.1.
+httpx==0.28.1
+
+# Member A intelligence. Gemini is the default provider; the engine talks to it
+# through app/intelligence/providers/base.py, so another provider can be added
+# without touching the rule engine. google-genai is the current unified Google
+# SDK (google-generativeai is the retired one).
+#
+# Held at 2.8.0 deliberately: 2.9.0 and later require pydantic>=2.12.5, which
+# would force a bump of the pydantic pin the whole application is built on.
+# 2.8.0 is the newest release that works with pydantic 2.9.2.
+google-genai==2.8.0
