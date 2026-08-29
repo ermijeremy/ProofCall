@@ -2,7 +2,7 @@
 
 from collections.abc import Generator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings
@@ -31,4 +31,37 @@ def init_db() -> None:
     from app import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
+    _upgrade_legacy_sqlite_schema()
 
+
+def _upgrade_legacy_sqlite_schema() -> None:
+    """Add columns introduced after the original demo database was created.
+
+    The project does not yet use Alembic, and ``create_all`` deliberately does
+    not alter existing tables.  These small, idempotent SQLite upgrades keep a
+    developer's existing dashboard database usable after a model change.
+    """
+
+    if engine.dialect.name != "sqlite":
+        return
+
+    employer_columns = {
+        "job_positions": "JSON NOT NULL DEFAULT '{}'",
+        "gender_breakdown": "JSON NOT NULL DEFAULT '{}'",
+        "age_band_breakdown": "JSON NOT NULL DEFAULT '{}'",
+    }
+    table_upgrades = {
+        "employers": employer_columns,
+        "teleexpert_calls": {
+            "answer_timeout_seconds": "INTEGER NOT NULL DEFAULT 45",
+        },
+        "interview_schedules": {
+            "answer_timeout_seconds": "INTEGER NOT NULL DEFAULT 45",
+        },
+    }
+    with engine.begin() as connection:
+        for table_name, columns in table_upgrades.items():
+            existing = {column["name"] for column in inspect(engine).get_columns(table_name)}
+            for name, definition in columns.items():
+                if name not in existing:
+                    connection.execute(text(f'ALTER TABLE "{table_name}" ADD COLUMN "{name}" {definition}'))

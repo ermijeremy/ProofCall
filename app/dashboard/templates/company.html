@@ -20,7 +20,7 @@ document.getElementById('schedule-form')?.addEventListener('submit', async (even
   if (!workerIds.length) { result.textContent = 'Select at least one worker.'; result.className = 'form-result error'; return; }
   try {
     const response = await fetch('/api/interviews/schedule', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({worker_ids: workerIds, scheduled_at: new Date(scheduledAt).toISOString()})});
-    const body = await response.json();
+    const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.detail || 'Unable to schedule interviews.');
     result.textContent = `${body.created.length} interview(s) scheduled successfully.`;
     result.className = 'form-result success';

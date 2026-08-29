@@ -2,6 +2,27 @@
 {% block title %}Live calls · CallProof{% endblock %}
 {% block page_title %}Live calls{% endblock %}
 {% block content %}
-<div class="page-intro"><div><p class="lede">TeleExpert call operations</p><p class="muted">Track every interview from queue to completed evidence.</p></div><span class="date-chip">Auto-synced</span></div>
-<section class="panel table-panel"><div class="panel-header"><div><h2>Call activity</h2><p class="muted">{{ calls|length }} call(s) in this workspace</p></div><span class="live-pill"><span class="online-dot"></span>Live</span></div>{% if calls %}<div class="table-wrap"><table><thead><tr><th>Worker</th><th>TeleExpert call ID</th><th>Status</th><th>Language</th><th>Retries</th><th>Created</th><th>Completed</th><th>Failure reason</th></tr></thead><tbody>{% for call in calls %}<tr><td><a class="worker-link" href="/api/dashboard/workers/{{ call.worker_id }}">{{ call.worker_id }}</a></td><td><code>{{ call.call_id }}</code></td><td><span class="status status-{{ call.status|lower|replace('_', '-') }}">{{ call.status|replace('_', ' ') }}</span></td><td>{{ call.language or "—" }}</td><td>{{ call.retries }}</td><td>{{ call.created_at }}</td><td>{{ call.completed_at or "—" }}</td><td>{{ call.failure_reason or "—" }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-state">No calls have been submitted yet.</div>{% endif %}</section>
+<div class="page-intro"><div><p class="lede">TeleExpert call operations</p><p class="muted">Track every interview from queue to completed evidence.</p></div><div class="intro-actions"><button class="primary-button" id="run-due">Run due interviews</button><span class="date-chip">Auto-synced</span></div></div><p id="run-result" class="form-result" role="status"></p>
+<section class="panel table-panel"><div class="panel-header"><div><h2>Call activity</h2><p class="muted">{{ calls|length }} call(s) in this workspace</p></div><span class="live-pill"><span class="online-dot"></span>Live</span></div>{% if calls %}<div class="table-wrap"><table><thead><tr><th>Worker</th><th>TeleExpert call ID</th><th>Status</th><th>Language</th><th>Retries</th><th>Created</th><th>Completed</th><th>Failure reason</th><th>Action</th></tr></thead><tbody>{% for call in calls %}<tr><td><a class="worker-link" href="/api/dashboard/workers/{{ call.worker_id }}">{{ call.worker_id }}</a></td><td><code>{{ call.call_id }}</code></td><td><span class="status status-{{ call.status|lower|replace('_', '-') }}">{{ call.status|replace('_', ' ') }}</span></td><td>{{ call.language or "—" }}</td><td>{{ call.retries }}</td><td>{{ call.created_at }}</td><td>{{ call.completed_at or "—" }}</td><td>{{ call.failure_reason or "—" }}</td><td><button class="secondary-button sync-button" data-sync-call="{{ call.call_id }}">Sync</button></td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-state">No calls have been submitted yet.</div>{% endif %}</section>
 {% endblock %}
+{% block scripts %}<script>
+document.getElementById('run-due')?.addEventListener('click', async () => {
+  const result = document.getElementById('run-result');
+  result.textContent = 'Submitting due interviews…';
+  try {
+    const response = await fetch('/api/interviews/run-due', {method: 'POST'});
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.detail || 'Unable to run due interviews.');
+    const submitted = body.filter((item) => item.status === 'submitted').length;
+    const failed = body.filter((item) => item.status === 'failed').length;
+    result.textContent = `${submitted} interview(s) submitted${failed ? `, ${failed} failed` : ''}. Refreshing…`;
+    result.className = failed ? 'form-result error' : 'form-result success';
+    setTimeout(() => window.location.reload(), 900);
+  } catch (error) { result.textContent = error.message; result.className = 'form-result error'; }
+});
+document.querySelectorAll('[data-sync-call]').forEach((button) => button.addEventListener('click', async () => {
+  button.disabled = true; button.textContent = 'Syncing…';
+  try { const response = await fetch(`/api/teleexpert/calls/${button.dataset.syncCall}/sync`, {method: 'POST'}); const body = await response.json(); if (!response.ok) throw new Error(body.detail || 'Unable to synchronize call.'); window.location.reload(); }
+  catch (error) { button.disabled = false; button.textContent = 'Retry'; const result = document.getElementById('run-result'); result.textContent = error.message; result.className = 'form-result error'; }
+}));
+</script>{% endblock %}

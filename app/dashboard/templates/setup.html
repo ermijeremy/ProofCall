@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Admin setup · CallProof{% endblock %}
+{% block page_title %}Admin setup{% endblock %}
+{% block content %}
+<div class="page-intro"><div><p class="lede">Prepare a verification round</p><p class="muted">Register the employer report, load its claimed workers, and create the campaign from one screen.</p></div><span class="date-chip">Admin workspace</span></div>
+<div class="setup-grid">
+  <section class="panel setup-card">
+    <div class="panel-header"><div><h2>1. Employer report</h2><p class="muted">Record what the company claims before worker evidence is collected.</p></div><span class="step-badge">01</span></div>
+    <form id="employer-form" class="admin-form"><div class="form-grid two-col">
+      <label>Company ID<input name="company_id" value="ABC" required></label><label>Company name<input name="name" value="Demo Employer" required></label>
+      <label>Claimed good jobs<input name="reported_good_jobs" type="number" min="0" value="20"></label><label>Worker count<input name="worker_count" type="number" min="0" value="20"></label>
+      <label>Average salary (ETB)<input name="average_salary" type="number" min="0" value="8500"></label><label>Training participation<input name="training_participation" type="number" min="0" value="20"></label>
+    </div><label>Job positions (JSON)<textarea name="job_positions">{"sales": 20}</textarea></label><label>Gender breakdown (JSON)<textarea name="gender_breakdown">{"female": 10, "male": 10}</textarea></label><label>Age-band breakdown (JSON)<textarea name="age_band_breakdown">{"15-24": 12, "25-34": 8}</textarea></label><button class="primary-button" type="submit">Save employer report</button><p id="employer-result" class="form-result" role="status"></p></form>
+  </section>
+  <section class="panel setup-card">
+    <div class="panel-header"><div><h2>2. Claimed workers</h2><p class="muted">Load the people the employer says belong to this programme.</p></div><span class="step-badge">02</span></div>
+    <form id="workers-form" class="admin-form"><label>Worker records (JSON)<textarea id="workers-json" class="large-textarea">{{ demo_workers|tojson(indent=2) }}</textarea></label><p class="field-hint">The company ID above is applied to every worker before import. Preferred language comes from each worker record; the admin does not choose it.</p><button class="primary-button" type="submit">Import worker records</button><p id="workers-result" class="form-result" role="status"></p></form>
+  </section>
+  <section class="panel setup-card setup-card-wide">
+    <div class="panel-header"><div><h2>3. Verification campaign</h2><p class="muted">Create the round that samples workers for interviews.</p></div><span class="step-badge">03</span></div>
+    <form id="campaign-form" class="admin-form"><div class="form-grid two-col"><label>Programme name<input name="programme_name" value="ProofCall Demo Programme" required></label><label>Company ID<input name="company_id" value="ABC" required></label><label>Sampling strategy<select name="strategy"><option value="sampled_verification">Sampled verification</option><option value="all_workers">All workers</option></select></label><label>Sample size<input name="sample_size" type="number" min="0" value="20"></label></div><label>Criteria (JSON)<textarea name="criteria">{"minimum_age": 15, "minimum_weekly_hours": 20, "minimum_duration_months": 6}</textarea><button class="primary-button" type="submit">Create campaign</button><p id="campaign-result" class="form-result" role="status"></p></form>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}<script>
+const parseJsonField = (form, name) => { try { return JSON.parse(form.elements[name].value || '{}'); } catch (error) { throw new Error(`${name} must contain valid JSON.`); } };
+const showResult = (id, message, success = false) => { const element = document.getElementById(id); element.textContent = message; element.className = `form-result ${success ? 'success' : 'error'}`; };
+const submitJson = async (url, payload) => { const response = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)}); const body = await response.json(); if (!response.ok) throw new Error(body.detail || 'Request failed.'); return body; };
+document.getElementById('employer-form').addEventListener('submit', async (event) => { event.preventDefault(); const form = event.currentTarget; try { const data = Object.fromEntries(new FormData(form)); for (const key of ['reported_good_jobs', 'worker_count', 'average_salary', 'training_participation']) data[key] = data[key] ? Number(data[key]) : null; for (const key of ['job_positions', 'gender_breakdown', 'age_band_breakdown']) data[key] = parseJsonField(form, key); await submitJson('/api/employers', data); showResult('employer-result', 'Employer report saved.', true); } catch (error) { showResult('employer-result', error.message); } });
+document.getElementById('workers-form').addEventListener('submit', async (event) => { event.preventDefault(); try { const workers = JSON.parse(document.getElementById('workers-json').value || '[]'); const companyId = document.querySelector('#employer-form [name="company_id"]').value; if (!Array.isArray(workers)) throw new Error('Worker records must be a JSON array.'); let imported = 0; for (const worker of workers) { await submitJson('/api/beneficiaries', {...worker, company_id: companyId}); imported += 1; } showResult('workers-result', `${imported} worker record(s) imported.`, true); } catch (error) { showResult('workers-result', error.message); } });
+document.getElementById('campaign-form').addEventListener('submit', async (event) => { event.preventDefault(); const form = event.currentTarget; try { const data = Object.fromEntries(new FormData(form)); data.sample_size = Number(data.sample_size || 0); data.criteria = parseJsonField(form, 'criteria'); await submitJson('/api/campaigns', data); showResult('campaign-result', 'Campaign created. Open the company page to schedule workers.', true); } catch (error) { showResult('campaign-result', error.message); } });
+</script>{% endblock %}
