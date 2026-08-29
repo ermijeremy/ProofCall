@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Worker {{ worker.worker_id }}</h1>
+<p>Call {{ worker.call_id }} · {{ worker.call_status }} · {{ worker.overall_verdict }}{% if worker.safeguarding_flag %} · Safeguarding flag{% endif %}</p>
+<table><tr><th>Clause</th><th>Status</th><th>Confidence</th><th>Evidence</th></tr>
+{% for name, clause in worker.clauses.items() %}<tr><td>{{ name }}</td><td>{{ clause.status }}</td><td>{{ clause.confidence }}</td><td>{{ clause.evidence or "—" }}</td></tr>{% endfor %}
+</table>
+{% endblock %}

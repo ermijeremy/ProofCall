@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ company.company_name }}</h1>
+<div class="grid">
+  <article><span>Employer claimed</span><strong>{{ company.employer_claimed }}</strong></article>
+  <article><span>Worker confirmed</span><strong>{{ company.worker_confirmed }}</strong></article>
+  <article><span>Not confirmed</span><strong>{{ company.not_confirmed }}</strong></article>
+  <article><span>Unclear</span><strong>{{ company.unclear }}</strong></article>
+</div>
+<h2>Material contradictions</h2>
+{% if company.contradictions %}<ul>{% for item in company.contradictions %}<li>{{ item.worker_id }}: {{ item.contradictions }}</li>{% endfor %}</ul>{% else %}<p class="muted">None recorded.</p>{% endif %}
+<p class="muted">Stopped / safeguarding cases: {{ company.stopped }}</p>
+{% endblock %}

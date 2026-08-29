@@ -1,0 +1,143 @@
+[
+  {
+    "worker_id": "W001",
+    "company_id": "ABC",
+    "phone_number": "+251911000001",
+    "preferred_language": "am",
+    "employer_claims": {"currently_employed": true, "salary": 8500}
+  },
+  {
+    "worker_id": "W002",
+    "company_id": "ABC",
+    "phone_number": "+251911000002",
+    "preferred_language": "am",
+    "employer_claims": {"currently_employed": true, "salary": 8500}
+  },
+  {
+    "worker_id": "W003",
+    "company_id": "ABC",
+    "phone_number": "+251911000003",
+    "preferred_language": "am",
+    "employer_claims": {"currently_employed": true, "salary": 8500}
+  },
+  {
+    "worker_id": "W004",
+    "company_id": "ABC",
+    "phone_number": "+251911000004",
+    "preferred_language": "am",
+    "employer_claims": {"currently_employed": true, "salary": 8500}
+  },
+  {
+    "worker_id": "W005",
+    "company_id": "ABC",
+    "phone_number": "+251911000005",
+    "preferred_language": "am",
+    "employer_claims": {"currently_employed": true, "salary": 8500}
+  },
+  {
+    "worker_id": "W006",
+    "company_id": "ABC",
+    "phone_number": "+251911000006",
+    "preferred_language": "am",
+    "employer_claims": {"currently_employed": true, "salary": 8500}
+  },
+  {
+    "worker_id": "W007",
+    "company_id": "ABC",
+    "phone_number": "+251911000007",
+    "preferred_language": "am",
+    "employer_claims": {"currently_employed": true, "salary": 8500}
+  },
+  {
+    "worker_id": "W008",
+    "company_id": "ABC",
+    "phone_number": "+251911000008",
+    "preferred_language": "am",
+    "employer_claims": {"currently_employed": true, "salary": 8500}
+  },
+  {
+    "worker_id": "W009",
+    "company_id": "ABC",
+    "phone_number": "+251911000009",
+    "preferred_language": "am",
+    "employer_claims": {"currently_employed": true, "salary": 8500}
+  },
+  {
+    "worker_id": "W010",
+    "company_id": "ABC",
+    "phone_number": "+251911000010",
+    "preferred_language": "am",
+    "employer_claims": {"currently_employed": true, "salary": 8500}
+  },
+  {
+    "worker_id": "W011",
+    "company_id": "ABC",
+    "phone_number": "+251911000011",
+    "preferred_language": "am",
+    "employer_claims": {"currently_employed": true, "salary": 8500}
+  },
+  {
+    "worker_id": "W012",
+    "company_id": "ABC",
+    "phone_number": "+251911000012",
+    "preferred_language": "am",
+    "employer_claims": {"currently_employed": true, "salary": 8500}
+  },
+  {
+    "worker_id": "W013",
+    "company_id": "ABC",
+    "phone_number": "+251911000013",
+    "preferred_language": "am",
+    "employer_claims": {"currently_employed": true, "salary": 8500}
+  },
+  {
+    "worker_id": "W014",
+    "company_id": "ABC",
+    "phone_number": "+251911000014",
+    "preferred_language": "am",
+    "employer_claims": {"currently_employed": true, "salary": 8500}
+  },
+  {
+    "worker_id": "W015",
+    "company_id": "ABC",
+    "phone_number": "+251911000015",
+    "preferred_language": "am",
+    "employer_claims": {"currently_employed": true, "salary": 8500}
+  },
+  {
+    "worker_id": "W016",
+    "company_id": "ABC",
+    "phone_number": "+251911000016",
+    "preferred_language": "am",
+    "employer_claims": {"currently_employed": true, "salary": 8500}
+  },
+  {
+    "worker_id": "W017",
+    "company_id": "ABC",
+    "phone_number": "+251911000017",
+    "preferred_language": "am",
+    "employer_claims": {"currently_employed": true, "salary": 8500}
+  },
+  {
+    "worker_id": "W018",
+    "company_id": "ABC",
+    "phone_number": "+251911000018",
+    "preferred_language": "am",
+    "employer_claims": {"currently_employed": true, "salary": 8500}
+  },
+  {
+    "worker_id": "W019",
+    "company_id": "ABC",
+    "phone_number": "+251911000019",
+    "preferred_language": "am",
+    "employer_claims": {"currently_employed": true, "salary": 8500}
+  },
+  {
+    "worker_id": "W020",
+    "company_id": "ABC",
+    "phone_number": "+251911000020",
+    "preferred_language": "am",
+    "employer_claims": {"currently_employed": true, "salary": 8500}
+  }
+]
+

@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Live calls</h1>
+<table><tr><th>Worker</th><th>TeleExpert call ID</th><th>Status</th><th>Created</th></tr>
+{% for call in calls %}<tr><td>{{ call.worker_id }}</td><td>{{ call.call_id }}</td><td><span class="status">{{ call.status }}</span></td><td>{{ call.created_at }}</td></tr>{% endfor %}
+</table>
+{% endblock %}

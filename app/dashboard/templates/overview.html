@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Programme overview</h1>
+<div class="grid">
+  <article><span>Employer claimed</span><strong>{{ summary.employer_claimed }}</strong></article>
+  <article><span>Worker confirmed</span><strong>{{ summary.worker_confirmed }}</strong></article>
+  <article><span>Not confirmed</span><strong>{{ summary.not_confirmed }}</strong></article>
+  <article><span>Unclear</span><strong>{{ summary.unclear }}</strong></article>
+  <article><span>Calls completed</span><strong>{{ summary.completed_interviews }}</strong></article>
+  <article><span>Response rate</span><strong>{{ summary.response_rate }}%</strong></article>
+  <article><span>Contradictions</span><strong>{{ summary.material_contradictions }}</strong></article>
+  <article><span>Stopped / safeguarding</span><strong>{{ summary.stopped }}</strong></article>
+</div>
+<p class="muted">Verification gap: {{ summary.employer_claimed }} employer claimed vs {{ summary.worker_confirmed }} independently confirmed.</p>
+<h2>Criteria currently in force</h2>
+<p class="muted">Language: {{ summary.language }}</p>
+{% if summary.criteria %}<pre>{{ summary.criteria }}</pre>{% else %}<p class="muted">Criteria are owned by the intelligence rule engine.</p>{% endif %}
+{% endblock %}
