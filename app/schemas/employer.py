@@ -1,6 +1,7 @@
 """Employer import and response schemas."""
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -12,6 +13,9 @@ class EmployerCreate(BaseModel):
     average_salary: int | None = Field(default=None, ge=0)
     training_participation: int | None = Field(default=None, ge=0)
     worker_count: int | None = Field(default=None, ge=0)
+    job_positions: dict[str, Any] = Field(default_factory=dict)
+    gender_breakdown: dict[str, Any] = Field(default_factory=dict)
+    age_band_breakdown: dict[str, Any] = Field(default_factory=dict)
 
 
 class EmployerRead(EmployerCreate):

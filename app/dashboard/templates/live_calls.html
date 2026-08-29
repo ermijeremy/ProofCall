@@ -1,7 +1,7 @@
 {% extends "base.html" %}
+{% block title %}Live calls · CallProof{% endblock %}
+{% block page_title %}Live calls{% endblock %}
 {% block content %}
-<h1>Live calls</h1>
-<table><tr><th>Worker</th><th>TeleExpert call ID</th><th>Status</th><th>Created</th></tr>
-{% for call in calls %}<tr><td>{{ call.worker_id }}</td><td>{{ call.call_id }}</td><td><span class="status">{{ call.status }}</span></td><td>{{ call.created_at }}</td></tr>{% endfor %}
-</table>
+<div class="page-intro"><div><p class="lede">TeleExpert call operations</p><p class="muted">Track every interview from queue to completed evidence.</p></div><span class="date-chip">Auto-synced</span></div>
+<section class="panel table-panel"><div class="panel-header"><div><h2>Call activity</h2><p class="muted">{{ calls|length }} call(s) in this workspace</p></div><span class="live-pill"><span class="online-dot"></span>Live</span></div>{% if calls %}<div class="table-wrap"><table><thead><tr><th>Worker</th><th>TeleExpert call ID</th><th>Status</th><th>Language</th><th>Retries</th><th>Created</th><th>Completed</th><th>Failure reason</th></tr></thead><tbody>{% for call in calls %}<tr><td><a class="worker-link" href="/api/dashboard/workers/{{ call.worker_id }}">{{ call.worker_id }}</a></td><td><code>{{ call.call_id }}</code></td><td><span class="status status-{{ call.status|lower|replace('_', '-') }}">{{ call.status|replace('_', ' ') }}</span></td><td>{{ call.language or "—" }}</td><td>{{ call.retries }}</td><td>{{ call.created_at }}</td><td>{{ call.completed_at or "—" }}</td><td>{{ call.failure_reason or "—" }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-state">No calls have been submitted yet.</div>{% endif %}</section>
 {% endblock %}

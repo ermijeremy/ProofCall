@@ -1,6 +1,7 @@
 """Verification campaign and sampled-worker persistence models."""
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
@@ -27,6 +28,6 @@ class CampaignWorker(Base):
 
     campaign_id: Mapped[str] = mapped_column(ForeignKey("campaigns.campaign_id"), primary_key=True)
     worker_id: Mapped[str] = mapped_column(ForeignKey("beneficiaries.worker_id"), primary_key=True)
-    call_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    call_id: Mapped[Any] = mapped_column(String(100), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(30), default="sampled", nullable=False)
     sampled_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)

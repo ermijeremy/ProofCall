@@ -26,5 +26,8 @@ class CallStatusRead(BaseModel):
     transcript: str | None = None
     transcript_turns: list[dict[str, Any]] | None = None
     language: str | None = None
+    completed_at: object | None = None
+    retries: int = 0
+    retry_delay_seconds: int = 0
     audio_url: str | None = None
     failure_reason: str | None = None

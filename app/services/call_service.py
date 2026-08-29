@@ -62,6 +62,8 @@ def sync_call_status(db: Session, call_id: str, client: TeleExpertClient | None 
     values = {
         "status": response.get("status", call.status),
         "transcript": response.get("transcript", call.transcript),
+        "transcript_turns": response.get("transcript_turns", call.transcript_turns),
+        "language": response.get("language", call.language),
         "audio_url": response.get("audio_url", call.audio_url),
         "failure_reason": response.get("failure_reason", call.failure_reason),
     }

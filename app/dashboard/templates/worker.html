@@ -1,8 +1,9 @@
 {% extends "base.html" %}
+{% block title %}Worker evidence · CallProof{% endblock %}
+{% block page_title %}Worker evidence{% endblock %}
 {% block content %}
-<h1>Worker {{ worker.worker_id }}</h1>
-<p>Call {{ worker.call_id }} · {{ worker.call_status }} · {{ worker.overall_verdict }}{% if worker.safeguarding_flag %} · Safeguarding flag{% endif %}</p>
-<table><tr><th>Clause</th><th>Status</th><th>Confidence</th><th>Evidence</th></tr>
-{% for name, clause in worker.clauses.items() %}<tr><td>{{ name }}</td><td>{{ clause.status }}</td><td>{{ clause.confidence }}</td><td>{{ clause.evidence or "—" }}</td></tr>{% endfor %}
-</table>
+<div class="page-intro"><div><p class="lede">Worker {{ worker.worker_id }}</p><p class="muted">Company {{ worker.company_id }} · Language {{ worker.preferred_language }}</p></div><span class="verdict verdict-{{ worker.overall_verdict|lower|replace('_', '-') }}">{{ worker.overall_verdict|replace('_', ' ') }}</span></div>
+{% if worker.safeguarding_flag %}<div class="alert danger-alert"><span>⚑</span><div><strong>Safeguarding flag raised</strong><p>This interview was stopped and excluded from good-job confirmation counts.</p></div></div>{% endif %}
+<section class="panel"><div class="panel-header"><div><h2>Clause-level evidence</h2><p class="muted">Evidence preserved from the interview</p></div><span class="call-reference">{{ worker.call_status }} · {{ worker.call_id }}</span></div><div class="evidence-list">{% for name, clause in worker.clauses.items() %}<div class="evidence-row"><div class="clause-name"><span class="clause-dot status-{{ clause.status|lower|replace('_', '-') }}"></span><strong>{{ name|replace('_', ' ')|title }}</strong></div><span class="status status-{{ clause.status|lower|replace('_', '-') }}">{{ clause.status|replace('_', ' ') }}</span><span class="confidence">{{ clause.confidence }} confidence</span><p>{{ clause.evidence or "No quoted evidence available." }}</p></div>{% endfor %}</div></section>
+<section class="panel transcript"><div class="panel-header"><div><h2>Interview record</h2><p class="muted">Source material for the evidence above</p></div>{% if worker.audio_url %}<a class="text-link" href="{{ worker.audio_url }}">Audio reference ↗</a>{% endif %}</div><blockquote>{{ worker.transcript or "Transcript unavailable." }}</blockquote></section>
 {% endblock %}

@@ -11,6 +11,24 @@ from app.repositories.calls import CallRepository
 from app.repositories.employers import EmployerRepository
 from app.repositories.evidence import EvidenceRepository
 
+CRITERIA = (
+    "age", "working_hours", "employment_duration", "salary",
+    "training_participation", "forced_labour", "discrimination",
+    "freedom_of_association",
+)
+
+
+def _criterion_breakdown(results: list[Any]) -> dict[str, dict[str, int]]:
+    statuses = ("MET", "NOT_MET", "UNCLEAR", "REFUSED", "NOT_ASKED", "STOPPED")
+    breakdown = {criterion: {status: 0 for status in statuses} for criterion in CRITERIA}
+    for result in results:
+        for name, clause in (result.clauses or {}).items():
+            breakdown.setdefault(name, {status: 0 for status in statuses})
+            status = clause.get("status", "UNCLEAR")
+            breakdown[name].setdefault(status, 0)
+            breakdown[name][status] += 1
+    return breakdown
+
 
 def _counts(results: list[Any]) -> dict[str, int]:
     return {
@@ -23,6 +41,41 @@ def _counts(results: list[Any]) -> dict[str, int]:
         "stopped": sum(r.overall_verdict == "STOPPED" for r in results),
         "safeguarding_flags": sum(bool(r.safeguarding_flag) for r in results),
     }
+
+
+def _company_workers(
+    beneficiaries: list[Beneficiary],
+    evidence: list[Any],
+    calls: list[Any],
+) -> list[dict[str, Any]]:
+    evidence_by_worker = {result.worker_id: result for result in evidence}
+    calls_by_worker: dict[str, list[Any]] = {}
+    for call in calls:
+        calls_by_worker.setdefault(call.worker_id, []).append(call)
+
+    workers = []
+    for worker in beneficiaries:
+        worker_calls = sorted(
+            calls_by_worker.get(worker.worker_id, []),
+            key=lambda item: item.created_at or 0,
+            reverse=True,
+        )
+        last_call = worker_calls[0] if worker_calls else None
+        result = evidence_by_worker.get(worker.worker_id)
+        workers.append(
+            {
+                "worker_id": worker.worker_id,
+                "phone_number": worker.phone_number,
+                "preferred_language": worker.preferred_language,
+                "employer_claims": worker.employer_claims or {},
+                "call_status": last_call.status if last_call else "not_scheduled",
+                "last_call_at": (last_call.completed_at or last_call.updated_at or last_call.created_at) if last_call else None,
+                "overall_verdict": result.overall_verdict if result else None,
+                "safeguarding_flag": bool(result.safeguarding_flag) if result else False,
+                "evidence_available": result is not None,
+            }
+        )
+    return workers
 
 
 def aggregate_company(db: Session, company_id: str) -> dict[str, Any]:
@@ -47,6 +100,15 @@ def aggregate_company(db: Session, company_id: str) -> dict[str, Any]:
             for result in evidence
             if result.contradictions
         ],
+        "criteria_breakdown": _criterion_breakdown(evidence),
+        "employer_fields": {
+            "job_positions": employer.job_positions,
+            "gender_breakdown": employer.gender_breakdown,
+            "age_band_breakdown": employer.age_band_breakdown,
+            "average_salary": employer.average_salary,
+            "training_participation": employer.training_participation,
+        },
+        "workers": _company_workers(beneficiaries, evidence, calls),
     }
 
 
@@ -58,6 +120,8 @@ def aggregate_programme(db: Session) -> dict[str, Any]:
     campaigns = CampaignRepository(db).list()
     counts = _counts(evidence)
     completed = sum(call.status == "completed" for call in calls)
+    company_overviews = [aggregate_company(db, employer.company_id) for employer in employers]
+    recent_calls = live_calls(db)[-8:]
     return {
         "employer_claimed": sum(item.reported_good_jobs for item in employers),
         **counts,
@@ -67,6 +131,9 @@ def aggregate_programme(db: Session) -> dict[str, Any]:
         "beneficiaries": len(beneficiaries),
         "criteria": campaigns[0].criteria if campaigns else {},
         "language": campaigns[0].language if campaigns else "am",
+        "company_overviews": company_overviews,
+        "recent_calls": recent_calls,
+        "criteria_breakdown": _criterion_breakdown(evidence),
     }
 
 
@@ -103,6 +170,10 @@ def live_calls(db: Session) -> list[dict[str, Any]]:
             "phone_number": workers[call.worker_id].phone_number if call.worker_id in workers else None,
             "status": call.status,
             "created_at": call.created_at,
+            "completed_at": call.completed_at,
+            "retries": call.retries,
+            "retry_delay_seconds": call.retry_delay_seconds,
+            "language": call.language or (workers[call.worker_id].preferred_language if call.worker_id in workers else None),
             "failure_reason": call.failure_reason,
         }
         for call in calls
