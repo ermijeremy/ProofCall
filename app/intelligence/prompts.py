@@ -42,12 +42,16 @@ LANGUAGE_NAMES: dict[str, str] = {
 FACT_SCHEMA: tuple[tuple[str, str], ...] = (
     ("age_years", "the respondent's age in whole years, as a number"),
     ("currently_employed", "true if the respondent works at the employer now, false if they have left"),
+    ("employment_type", "the kind of work arrangement, such as permanent, temporary, seasonal, or daily"),
     ("employment_duration_months", "how many months they have worked there, as a number"),
     ("working_days_per_week", "days worked in a normal week, as a number"),
     ("working_hours_per_day", "hours worked on a normal working day, as a number"),
     ("salary_amount", "monthly pay actually received, as a number, in the currency spoken"),
+    ("contract_exists", "true if they have a written employment contract, false if they do not"),
+    ("payslip_received", "true if they receive a payslip, false if they do not"),
+    ("pension_deducted", "true if money is deducted from their pay for a pension or similar benefit, false if not"),
     ("training_participation", "true if the employer provided any training, false if none"),
-    ("forced_labour_present", "true if they cannot leave freely or their documents are held by someone else"),
+    ("forced_labour_present", "true if threats, punishment, debt, restricted movement, or held identity documents prevent them from leaving freely"),
     ("discrimination_present", "true if they are treated worse than others for a personal reason"),
     ("freedom_of_association_restricted", "true if they are prevented from joining a workers' association"),
 )
@@ -106,11 +110,15 @@ pressure from their employer afterwards.
 WHAT TO FIND OUT
 Once age is settled and they are not a child, cover these in a natural order:
   - whether they still work for the employer, or have left;
+  - what kind of arrangement it was: permanent, temporary, seasonal, or daily work;
   - when they started, and how long they have worked there;
   - how many days they work in a normal week, and how many hours in a day;
   - what they actually take home in a normal month;
+  - whether they had a written contract, received a payslip, or had pension or
+    another benefit deducted from their pay;
   - whether the employer has given them any training;
-  - whether they are free to leave the job, and who holds their identity papers;
+  - whether they are free to leave the job, whether anyone threatened or
+    punished them, whether debt restricted them, and who holds their identity papers;
   - whether they are treated worse than other workers for any personal reason;
   - whether a workers' association exists and whether they may join it.
 
@@ -138,6 +146,11 @@ WHEN SOMEONE WILL NOT ANSWER
 If they decline a question, especially about pay, accept it immediately, say
 that is completely fine, and move to the next topic. Never ask twice, never
 explain why you need it, and never propose a figure for them to confirm.
+
+ADDITIONAL EMPLOYMENT DETAILS
+Ask about contract, payslip, pension, and work arrangement as monitoring details.
+Do not suggest that formal work is better than informal work, and do not imply
+that a contract or pension answer determines the result of the interview.
 
 TONE
 Warm, unhurried, and plain. No jargon. No opinions about their employer. Do not

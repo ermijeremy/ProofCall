@@ -24,6 +24,12 @@ class Settings(BaseModel):
     teleexpert_answer_timeout_seconds: int = Field(
         default_factory=lambda: int(os.getenv("TELEXPERT_ANSWER_TIMEOUT_SECONDS", "45"))
     )
+    scheduler_enabled: bool = Field(
+        default_factory=lambda: os.getenv("CALLPROOF_SCHEDULER_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+    )
+    scheduler_interval_seconds: int = Field(
+        default_factory=lambda: max(1, int(os.getenv("CALLPROOF_SCHEDULER_INTERVAL_SECONDS", "10")))
+    )
 
 
 settings = Settings()

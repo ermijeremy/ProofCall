@@ -80,7 +80,14 @@ def audio(call_id: str, db: Session = Depends(get_db)) -> Response:
     if CallRepository(db).get(call_id) is None:
         raise HTTPException(status_code=404, detail=f"Call not found: {call_id}")
     try:
-        return Response(content=TeleExpertClient().get_audio(call_id), media_type="audio/wav")
+        return Response(
+            content=TeleExpertClient().get_audio(call_id),
+            media_type="audio/x-wav",
+            headers={
+                "Content-Disposition": f'inline; filename="callproof-{call_id}.wav"',
+                "Accept-Ranges": "bytes",
+            },
+        )
     except TeleExpertError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 

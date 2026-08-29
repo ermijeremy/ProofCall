@@ -108,6 +108,7 @@ def run_due_interviews(
                     retry_delay_seconds=schedule.retry_delay_seconds,
                     answer_timeout_seconds=schedule.answer_timeout_seconds,
                 ),
+                idempotency_key=f"callproof-interview-{schedule.schedule_id}",
             )
             schedule.status = "submitted"
             schedule.call_id = call.call_id

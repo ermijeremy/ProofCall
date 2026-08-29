@@ -39,6 +39,14 @@ class TeleExpertClient:
             response = self.http_client.request(method, url, **kwargs)
             response.raise_for_status()
             return response.json()
+        except httpx.HTTPStatusError as exc:
+            detail = exc.response.text.strip()
+            if len(detail) > 500:
+                detail = detail[:500] + "..."
+            suffix = f": {detail}" if detail else ""
+            raise TeleExpertError(
+                f"TeleExpert request failed ({exc.response.status_code}){suffix}"
+            ) from exc
         except (httpx.HTTPError, ValueError) as exc:
             raise TeleExpertError(f"TeleExpert request failed: {exc}") from exc
 
@@ -50,6 +58,14 @@ class TeleExpertClient:
             response = self.http_client.request(method, url, **kwargs)
             response.raise_for_status()
             return response.content
+        except httpx.HTTPStatusError as exc:
+            detail = exc.response.text.strip()
+            if len(detail) > 500:
+                detail = detail[:500] + "..."
+            suffix = f": {detail}" if detail else ""
+            raise TeleExpertError(
+                f"TeleExpert request failed ({exc.response.status_code}){suffix}"
+            ) from exc
         except httpx.HTTPError as exc:
             raise TeleExpertError(f"TeleExpert request failed: {exc}") from exc
 
@@ -66,6 +82,7 @@ class TeleExpertClient:
         answer_timeout_seconds: int = 45,
         webhook_url: str | None = None,
         webhook_secret: str | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         payload = {
             "phone_number": phone_number,
@@ -79,7 +96,8 @@ class TeleExpertClient:
             payload["webhook"] = {"url": webhook_url}
             if webhook_secret:
                 payload["webhook"]["secret"] = webhook_secret
-        result = self._request("POST", "/v1/calls", json=payload)
+        headers = {"Idempotency-Key": idempotency_key} if idempotency_key else None
+        result = self._request("POST", "/v1/calls", json=payload, headers=headers)
         if not result.get("call_id") and not result.get("id"):
             raise TeleExpertError("TeleExpert response did not include a call ID")
         return result

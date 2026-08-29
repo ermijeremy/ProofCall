@@ -69,6 +69,7 @@ def _company_workers(
                 "preferred_language": worker.preferred_language,
                 "employer_claims": worker.employer_claims or {},
                 "call_status": last_call.status if last_call else "not_scheduled",
+                "failure_reason": last_call.failure_reason if last_call else None,
                 "last_call_at": (last_call.completed_at or last_call.updated_at or last_call.created_at) if last_call else None,
                 "overall_verdict": result.overall_verdict if result else None,
                 "safeguarding_flag": bool(result.safeguarding_flag) if result else False,
