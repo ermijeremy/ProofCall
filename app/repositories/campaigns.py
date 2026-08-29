@@ -1,0 +1,2 @@
+"""Campaign repository interface."""
+

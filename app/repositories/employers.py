@@ -1,0 +1,2 @@
+"""Employer repository interface."""
+

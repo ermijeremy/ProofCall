@@ -1,0 +1,2 @@
+"""CallProof application package."""
+

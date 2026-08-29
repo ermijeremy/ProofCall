@@ -1,0 +1,2 @@
+"""TeleExpert call repository interface."""
+

@@ -1,0 +1,2 @@
+"""Beneficiary repository interface."""
+
