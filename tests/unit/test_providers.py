@@ -26,6 +26,7 @@ from app.intelligence.providers import (
     LLMProvider,
     ProviderError,
     RecordedProvider,
+    ToolCallingProvider,
 )
 from app.intelligence.providers import gemini as gemini_module
 
@@ -46,11 +47,54 @@ class StubClient:
         self.calls: list[dict[str, Any]] = []
         self.models = self
 
-    def generate_content(self, *, model: str, contents: str, config: Any) -> Any:
+    def generate_content(self, *, model: str, contents: Any, config: Any) -> Any:
         self.calls.append({"model": model, "contents": contents, "config": config})
         if self.raises is not None:
             raise self.raises
-        return type("Response", (), {"text": self.text})()
+        return type("Response", (), {"text": self.text, "function_calls": []})()
+
+
+class StubToolClient:
+    """Stands in for ``genai.Client`` on the function-calling path.
+
+    Returns whatever calls it was constructed with, so a test can assert on the
+    declarations and contents the provider built without a network round trip.
+    """
+
+    def __init__(
+        self,
+        calls: list[Any] | None = None,
+        text: str | None = None,
+        raises: Exception | None = None,
+    ) -> None:
+        self.returns = calls if calls is not None else []
+        self.text = text
+        self.raises = raises
+        self.calls: list[dict[str, Any]] = []
+        self.models = self
+
+    def generate_content(self, *, model: str, contents: Any, config: Any) -> Any:
+        self.calls.append({"model": model, "contents": contents, "config": config})
+        if self.raises is not None:
+            raise self.raises
+        return type("Response", (), {"text": self.text, "function_calls": self.returns})()
+
+
+class StubCall:
+    def __init__(self, name: str, args: dict[str, Any] | None = None) -> None:
+        self.name = name
+        self.args = args or {}
+
+
+SELECT_TOOL = {
+    "name": "select_people",
+    "description": "Choose who to call.",
+    "parameters": {
+        "type": "object",
+        "properties": {"worker_ids": {"type": "array", "items": {"type": "string"}}},
+        "required": ["worker_ids"],
+    },
+}
 
 
 def _gemini(**kwargs: Any) -> GeminiProvider:
@@ -719,3 +763,111 @@ def test_startup_registration_returns_the_engine_when_a_provider_exists(
 
     assert engine is not None
     assert _clean_registry.get_engine() is engine
+
+
+# --------------------------------------------------------------------------- #
+# The router path: forced function calling
+# --------------------------------------------------------------------------- #
+
+
+def test_gemini_satisfies_the_tool_calling_port() -> None:
+    assert isinstance(GeminiProvider(client=StubToolClient()), ToolCallingProvider)
+
+
+def test_the_fixture_provider_does_not_claim_to_choose_actions() -> None:
+    """A replay of recorded extractions cannot decide anything.
+
+    The two protocols are split precisely so this reads as a fact about the
+    fixture provider rather than as a missing method somebody should add.
+    """
+
+    assert isinstance(RecordedProvider(), LLMProvider)
+    assert not isinstance(RecordedProvider(), ToolCallingProvider)
+
+
+def test_the_chosen_tool_comes_back_with_its_arguments() -> None:
+    client = StubToolClient(calls=[StubCall("select_people", {"worker_ids": ["w_1", "w_2"]})])
+    provider = GeminiProvider(client=client)
+    chosen = provider.complete_tool_call(
+        system="route", messages=[{"role": "user", "text": "call two of them"}], tools=[SELECT_TOOL]
+    )
+    assert chosen == {"name": "select_people", "arguments": {"worker_ids": ["w_1", "w_2"]}}
+
+
+def test_a_call_is_forced_rather_than_merely_offered() -> None:
+    """``mode="ANY"`` is the whole reason this path exists.
+
+    Without it the model may answer with prose, and a router that receives prose
+    where an action was required has no action to take and no error to report.
+    """
+
+    client = StubToolClient(calls=[StubCall("select_people")])
+    GeminiProvider(client=client).complete_tool_call(
+        system="route", messages=[{"role": "user", "text": "everyone"}], tools=[SELECT_TOOL]
+    )
+    config = client.calls[0]["config"]
+    assert config.tool_config.function_calling_config.mode == "ANY"
+    declared = config.tools[0].function_declarations
+    assert [declaration.name for declaration in declared] == ["select_people"]
+
+
+def test_no_tool_chosen_is_a_provider_error_not_an_empty_result() -> None:
+    provider = GeminiProvider(client=StubToolClient(calls=[], text="I am not sure who you mean."))
+    with pytest.raises(ProviderError) as raised:
+        provider.complete_tool_call(
+            system="route", messages=[{"role": "user", "text": "hmm"}], tools=[SELECT_TOOL]
+        )
+    assert "chose no tool" in str(raised.value)
+
+
+def test_a_tool_result_is_fed_back_as_its_own_turn() -> None:
+    """One admin message may need two actions, so the loop has to be able to reply.
+
+    The model's own previous call is replayed alongside the response, because a
+    function response referring to a call the conversation does not contain is
+    rejected by the API.
+    """
+
+    client = StubToolClient(calls=[StubCall("schedule_calls", {"when_iso": "2026-08-31T15:00:00"})])
+    GeminiProvider(client=client).complete_tool_call(
+        system="route",
+        messages=[
+            {"role": "user", "text": "call Abebe and schedule for tomorrow at 3"},
+            {"role": "model", "call": {"name": "select_people", "arguments": {"worker_ids": ["w_1"]}}},
+            {"role": "tool", "name": "select_people", "response": {"selected": ["Abebe Kebede"]}},
+        ],
+        tools=[SELECT_TOOL],
+    )
+    contents = client.calls[0]["contents"]
+    assert [content.role for content in contents] == ["user", "model", "user"]
+    assert contents[1].parts[0].function_call.name == "select_people"
+    assert contents[2].parts[0].function_response.response == {"selected": ["Abebe Kebede"]}
+
+
+def test_the_router_path_rotates_keys_like_every_other_call() -> None:
+    """The retry rules live in one place, so both call shapes obey them.
+
+    A quota failure on the router would otherwise read to the admin as a refusal
+    to act, which is the same class of bug as the transport failure that read as
+    "I could not tell who you meant".
+    """
+
+    exhausted = StubToolClient(raises=RuntimeError("429 RESOURCE_EXHAUSTED"))
+    answering = StubToolClient(calls=[StubCall("dial_now")])
+    provider = GeminiProvider(clients=[exhausted, answering])
+    chosen = provider.complete_tool_call(
+        system="route", messages=[{"role": "user", "text": "yes go ahead"}], tools=[SELECT_TOOL]
+    )
+    assert chosen["name"] == "dial_now"
+    assert len(exhausted.calls) == 1 and len(answering.calls) == 1
+
+
+def test_a_key_is_never_readable_in_a_router_failure() -> None:
+    key = "AIzaSyFAKE" + "0" * 30
+    provider = GeminiProvider(api_keys=[key])
+    provider._clients[key] = StubToolClient(raises=RuntimeError("429 RESOURCE_EXHAUSTED"))
+    with pytest.raises(ProviderError) as raised:
+        provider.complete_tool_call(
+            system="route", messages=[{"role": "user", "text": "go"}], tools=[SELECT_TOOL]
+        )
+    assert key not in str(raised.value)

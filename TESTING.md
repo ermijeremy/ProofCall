@@ -114,8 +114,15 @@ projects that already used it, and a newer key gets
 .venv/bin/python -m uvicorn app.main:app --reload
 ```
 
-Then visit `http://127.0.0.1:8000/api/dashboard` (the batch listing) and
-`http://127.0.0.1:8000/docs`.
+Then visit `http://127.0.0.1:8000/` (the list of companies) and
+`http://127.0.0.1:8000/docs`. Clicking a company opens its thread at
+`/c/{company_id}`; the "+ Add company" button on the list creates one. The old
+clause-path report is still at `http://127.0.0.1:8000/api/dashboard/programme`.
+
+The schema changed when the thread became company-scoped: `batch_messages.batch_id`
+is now nullable, and `create_all` does not alter an existing table. A database file
+from before that change raises `NOT NULL constraint failed: batch_messages.batch_id`
+on the first message, so move it aside and let the app recreate it.
 
 `app/main.py`'s startup hook calls `init_db()` and `try_register_default_engine()`,
 so the engine is registered for you. It uses `try_register_default_engine`, not

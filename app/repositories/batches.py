@@ -1,5 +1,7 @@
 """Interview-batch persistence operations."""
 
+from datetime import datetime
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -20,6 +22,30 @@ class BatchRepository(Repository[InterviewBatch]):
             select(InterviewBatch)
             .where(InterviewBatch.company_id == company_id)
             .order_by(InterviewBatch.created_at.desc())
+        )
+        return list(self.db.scalars(statement).all())
+
+    def newest_for_company(self, company_id: str) -> InterviewBatch | None:
+        """The round the thread is currently working on, if there is one."""
+
+        rounds = self.for_company(company_id)
+        return rounds[0] if rounds else None
+
+    def due(self, moment: datetime, status: str) -> list[InterviewBatch]:
+        """Scheduled rounds whose time has come, oldest first.
+
+        Ordered oldest first so a backlog after a restart goes out in the order it
+        was promised rather than newest-first.
+        """
+
+        statement = (
+            select(InterviewBatch)
+            .where(
+                InterviewBatch.status == status,
+                InterviewBatch.scheduled_at.is_not(None),
+                InterviewBatch.scheduled_at <= moment,
+            )
+            .order_by(InterviewBatch.scheduled_at)
         )
         return list(self.db.scalars(statement).all())
 
@@ -75,6 +101,21 @@ class BatchTargetRepository(Repository[BatchTarget]):
 class BatchMessageRepository(Repository[BatchMessage]):
     def __init__(self, db: Session) -> None:
         super().__init__(db, BatchMessage)
+
+    def for_company(self, company_id: str) -> list[BatchMessage]:
+        """The whole thread for one company, oldest turn first.
+
+        The thread is company-scoped rather than round-scoped: one company has one
+        conversation, and a question like "how many have we not reached yet?" spans
+        every round in it.
+        """
+
+        statement = (
+            select(BatchMessage)
+            .where(BatchMessage.company_id == company_id)
+            .order_by(BatchMessage.created_at, BatchMessage.message_id)
+        )
+        return list(self.db.scalars(statement).all())
 
     def for_batch(self, batch_id: str) -> list[BatchMessage]:
         statement = (

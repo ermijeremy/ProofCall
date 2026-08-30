@@ -1,15 +1,15 @@
-"""Who gets called: the model parses the instruction, code draws the sample.
+"""Who gets called: the model names a shape, code draws the sample.
 
-The admin types "call all of them", "call half of them at random", "call Abebe
-and Marta", or "call the ones we haven't reached yet". Reading that is a language
-problem and the model is good at it. Choosing ten of twenty is not: a model asked
-to list names produces a sample that is neither uniform nor auditable, and can
-name somebody who is not on the roster at all.
+The router (:mod:`app.intelligence.agent`) reads the administrator's sentence and
+calls ``select_people`` with a shape — everyone, a number, a share, specific
+worker ids, or whoever is left. This module turns that shape into actual people.
 
-So the model returns a *specification* and never a list of people. Code resolves
-the specification against the real roster, draws the sample, and reports anything
-it could not resolve instead of quietly calling fewer people than the admin asked
-for. Every call is a real phone ringing, so a wrong sample cannot be taken back.
+The division is the point. A model asked to pick ten of twenty produces a sample
+that is neither uniform nor auditable, and can name somebody who is not on the
+list at all. So a random draw is always made here, in Python, against the real
+roster; the model is only ever allowed to say *how many*. Named people are the
+one exception, and even then the model passes worker ids copied from the roster
+it was shown rather than names it typed out, so there is nothing left to match.
 """
 
 from __future__ import annotations
@@ -18,8 +18,6 @@ import logging
 import math
 from typing import Any, Callable
 
-from app.intelligence.providers.base import LLMProvider, ProviderError
-
 logger = logging.getLogger(__name__)
 
 MODES = ("all", "count", "fraction", "explicit", "remaining", "unclear")
@@ -27,49 +25,12 @@ MODES = ("all", "count", "fraction", "explicit", "remaining", "unclear")
 Sampler = Callable[[list[dict[str, Any]], int], list[dict[str, Any]]]
 
 
-def build_selection_prompt() -> str:
-    """System instructions for reading one selection instruction."""
-
-    return """You read one instruction from an administrator about which people to
-telephone, and you describe what they asked for. You do not choose the people.
-
-Return JSON only, with exactly this shape:
-
-{
-  "mode": "all" | "count" | "fraction" | "explicit" | "remaining" | "unclear",
-  "count": a whole number, or null,
-  "fraction": a number between 0 and 1, or null,
-  "names": ["..."] or null,
-  "exclude_already_called": true or false,
-  "confidence": "HIGH" | "MEDIUM" | "LOW"
-}
-
-MODES
-  "all"        everybody on the list.
-  "count"      a specific number of them, chosen at random. Put it in "count".
-  "fraction"   a proportion of them, chosen at random. Put it in "fraction",
-               as a decimal: half is 0.5, and 20 percent is 0.2.
-  "explicit"   named people only. Put the names in "names", spelled as the
-               administrator spelled them.
-  "remaining"  everybody who has not been called yet.
-  "unclear"    you cannot tell what they asked for. Use this rather than guessing.
-
-RULES
-Never return names for a random selection; that is not your decision to make.
-Set "exclude_already_called" to true when they asked for people not yet reached,
-or said "the rest", "the others", or "who is left".
-Use "unclear" and "LOW" confidence whenever the instruction could reasonably mean
-two different groups of people. A wrong guess places real telephone calls that
-cannot be taken back.
-"""
-
-
 def normalize_spec(payload: dict[str, Any]) -> dict[str, Any]:
-    """Coerce a model response into a spec, refusing anything unusable.
+    """Coerce ``select_people`` arguments into a spec, refusing anything unusable.
 
     A malformed spec becomes ``unclear`` rather than a default of "everybody":
     defaulting to everybody would turn a misread instruction into the largest
-    possible number of phone calls.
+    possible number of telephone calls.
     """
 
     mode = payload.get("mode")
@@ -84,50 +45,27 @@ def normalize_spec(payload: dict[str, Any]) -> dict[str, Any]:
     else:
         fraction = None
 
-    names = payload.get("names")
-    names = [name.strip() for name in names if isinstance(name, str) and name.strip()] if isinstance(names, list) else []
+    worker_ids = payload.get("worker_ids")
+    worker_ids = (
+        [str(item).strip() for item in worker_ids if str(item).strip()]
+        if isinstance(worker_ids, (list, tuple))
+        else []
+    )
 
     if mode == "count" and count is None:
         mode = "unclear"
     if mode == "fraction" and fraction is None:
         mode = "unclear"
-    if mode == "explicit" and not names:
+    if mode == "explicit" and not worker_ids:
         mode = "unclear"
 
-    confidence = payload.get("confidence")
     return {
         "mode": mode,
         "count": count,
         "fraction": fraction,
-        "names": names,
+        "worker_ids": worker_ids,
         "exclude_already_called": bool(payload.get("exclude_already_called", False)) or mode == "remaining",
-        "confidence": confidence if confidence in {"HIGH", "MEDIUM", "LOW"} else "LOW",
     }
-
-
-def parse_selection(provider: LLMProvider, instruction: str) -> dict[str, Any]:
-    """Ask the provider what the admin asked for. Returns a normalized spec."""
-
-    try:
-        payload = provider.complete_json(
-            system=build_selection_prompt(),
-            user=f"Instruction:\n\n{instruction}",
-        )
-    except ProviderError:
-        logger.exception("Selection parsing failed")
-        return normalize_spec({"mode": "unclear", "confidence": "LOW"})
-    return normalize_spec(payload)
-
-
-def _match(name: str, candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    wanted = name.casefold().strip()
-    exact = [item for item in candidates if (item.get("name") or "").casefold().strip() == wanted]
-    if exact:
-        return exact
-    partial = [item for item in candidates if wanted and wanted in (item.get("name") or "").casefold()]
-    if partial:
-        return partial
-    return [item for item in candidates if (item.get("worker_id") or "").casefold() == wanted]
 
 
 def resolve(
@@ -140,8 +78,8 @@ def resolve(
     """Turn a spec into the people to call, plus everything it could not resolve.
 
     ``roster`` items are ``{"worker_id", "name", ...}``. Returns
-    ``{"selected", "unmatched", "ambiguous", "skipped_already_called", "error"}``.
-    A returned ``error`` means nothing was selected and the admin must be asked
+    ``{"selected", "unknown_ids", "skipped_already_called", "error"}``. A returned
+    ``error`` means nothing was selected and the administrator must be asked
     again — never that a smaller sample should be called instead.
     """
 
@@ -159,8 +97,7 @@ def resolve(
 
     result: dict[str, Any] = {
         "selected": [],
-        "unmatched": [],
-        "ambiguous": {},
+        "unknown_ids": [],
         "skipped_already_called": skipped,
         "error": None,
         "mode": spec.get("mode"),
@@ -175,33 +112,20 @@ def resolve(
         return result
 
     if spec["mode"] == "explicit":
+        by_id = {person["worker_id"]: person for person in candidates}
         chosen: dict[str, dict[str, Any]] = {}
-        for name in spec["names"]:
-            matches = _match(name, candidates)
-            if not matches:
-                result["unmatched"].append(name)
-            elif len(matches) > 1:
-                # Two people called Abebe is a question for the admin, not a coin
-                # flip: calling the wrong one cannot be undone. Both the id and
-                # the name go back, because an admin reading the thread can pick
-                # between "Abebe Kebede, +251911000001" and its neighbour but not
-                # between two opaque worker ids.
-                result["ambiguous"][name] = [
-                    {
-                        "worker_id": person["worker_id"],
-                        "name": person.get("name") or person["worker_id"],
-                        "phone_number": person.get("phone_number"),
-                    }
-                    for person in matches
-                ]
+        for worker_id in spec["worker_ids"]:
+            person = by_id.get(worker_id)
+            if person is None:
+                # Either the model invented an id or it named somebody already
+                # called or excluded. Reported rather than dropped: calling four
+                # people when five were named is a failure that looks like success.
+                result["unknown_ids"].append(worker_id)
             else:
-                chosen[matches[0]["worker_id"]] = matches[0]
+                chosen[worker_id] = person
         result["selected"] = list(chosen.values())
         if not result["selected"]:
-            # Ambiguity is not absence. Reporting "nobody matches" when two people
-            # matched sends the admin looking for a missing row that is there
-            # twice, so the two cases get separate errors.
-            result["error"] = "ambiguous" if result["ambiguous"] else "nothing_matched"
+            result["error"] = "nothing_matched"
         return result
 
     if spec["mode"] in {"all", "remaining"}:
@@ -226,10 +150,4 @@ def resolve(
     return result
 
 
-__all__ = [
-    "MODES",
-    "build_selection_prompt",
-    "normalize_spec",
-    "parse_selection",
-    "resolve",
-]
+__all__ = ["MODES", "normalize_spec", "resolve"]

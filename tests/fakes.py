@@ -1,15 +1,15 @@
-"""Offline stand-ins for the batch path's model calls.
+"""Offline stand-ins for the company thread's model calls.
 
-The batch path makes exactly five kinds of provider call — question refinement,
-extraction, categorization, selection parsing, and analysis — and
-:class:`FakeBatchProvider` answers all five, chosen by the system prompt it is
-handed. That keeps the whole flow testable with no network, no API key, and no
-telephone.
+Two fakes live here. :class:`FakeBatchProvider` answers the three JSON calls —
+question refinement, extraction, and categorization — chosen by the system prompt
+it is handed. :class:`FakeToolProvider` adds the fourth, the router, which is
+function calling rather than JSON and therefore a different method. Together they
+make the whole flow testable with no network, no API key, and no telephone.
 
-The fake behaves like a competent model, not like a hostile one. Everything a
-real provider could return that code has to reject (a category outside the
-declared set, a malformed selection spec, an invented worker id) is exercised in
-the unit suites against narrower stubs.
+The fakes behave like a competent model, not a hostile one. Everything a real
+provider could return that code has to reject — a category outside the declared
+set, a malformed selection spec, an invented worker id, a tool that is not on the
+list — is exercised in the unit suites against narrower stubs.
 """
 
 from __future__ import annotations
@@ -44,13 +44,16 @@ _STOPWORDS = frozenset({"what", "does", "your", "have", "with", "that", "this", 
 
 
 class FakeBatchProvider:
-    """Answers all five batch model calls, chosen by the system prompt."""
+    """Answers the three JSON model calls, chosen by the system prompt.
+
+    Satisfies ``LLMProvider`` and nothing more, which is the honest description:
+    it cannot choose an action, so :meth:`BatchIntelligence.decide` refuses it.
+    """
 
     name = "fake"
 
     def __init__(self) -> None:
         self.calls: list[dict[str, str]] = []
-        self.selection: dict[str, Any] = {"mode": "all", "confidence": "HIGH"}
 
     def complete_json(self, *, system: str, user: str) -> dict[str, Any]:
         self.calls.append({"system": system, "user": user})
@@ -60,10 +63,6 @@ class FakeBatchProvider:
             return self._extract(system, user)
         if "You group answers" in system:
             return self._categorize(user)
-        if "You read one instruction from an administrator" in system:
-            return dict(self.selection)
-        if "You answer an administrator's questions" in system:
-            return {"answer": "Two of the three counted interviews said the pay is not enough."}
         raise AssertionError(f"Unexpected system prompt: {system[:60]}")
 
     def calls_for(self, marker: str) -> list[dict[str, str]]:
@@ -160,4 +159,217 @@ class FakeBatchProvider:
         return result
 
 
-__all__ = ["TRANSCRIPTS", "FakeBatchProvider"]
+#: What the fake router does with a message, in the order it is checked. Each
+#: entry is a marker to look for in the administrator's words and the tools to
+#: call in reply, one per step. A real model reads the sentence; this reads a
+#: keyword, which is exactly the thing the real path no longer does — and that is
+#: the point of a fake: the routing under test is the *dispatch*, not the reading.
+ROUTES: list[tuple[str, list[dict[str, Any]]]] = [
+    ("what is ur age", [{"name": "set_questions", "arguments": {"questions": "LINES"}}, {"name": "answer"}]),
+    ("swahili", [{"name": "set_language", "arguments": {"code": "sw"}}, {"name": "answer"}]),
+    ("klingon", [{"name": "set_language", "arguments": {"code": "tlh"}}, {"name": "answer"}]),
+    ("all of them", [{"name": "select_people", "arguments": {"mode": "all"}}, {"name": "answer"}]),
+    ("everyone", [{"name": "select_people", "arguments": {"mode": "all"}}, {"name": "answer"}]),
+    ("half of them", [{"name": "select_people", "arguments": {"mode": "fraction", "fraction": 0.5}}, {"name": "answer"}]),
+    ("40%", [{"name": "select_people", "arguments": {"mode": "fraction", "fraction": 0.4}}, {"name": "answer"}]),
+    ("two of them", [{"name": "select_people", "arguments": {"mode": "count", "count": 2.0}}, {"name": "answer"}]),
+    (
+        "haven't reached",
+        [{"name": "select_people", "arguments": {"mode": "remaining"}}, {"name": "answer"}],
+    ),
+    ("thirty of them", [{"name": "select_people", "arguments": {"mode": "count", "count": 30.0}}, {"name": "answer"}]),
+    ("usual people", [{"name": "ask", "arguments": {"text": "Who do you mean?"}}]),
+    ("cancel", [{"name": "cancel_selection", "arguments": {}}, {"name": "answer"}]),
+    ("no,", [{"name": "cancel_selection", "arguments": {}}, {"name": "answer"}]),
+    ("yes", [{"name": "dial_now", "arguments": {}}, {"name": "answer"}]),
+    ("call them now", [{"name": "dial_now", "arguments": {}}, {"name": "answer"}]),
+    (
+        "ask me for the time",
+        [{"name": "ask_schedule", "arguments": {"missing": ["when"], "text": "When should I call?"}}],
+    ),
+    ("schedule the calls for", [{"name": "schedule_calls", "arguments": "SCHEDULE"}, {"name": "answer"}]),
+    ("call ", [{"name": "select_people", "arguments": "NAMED"}, {"name": "answer"}]),
+]
+
+
+class FakeToolProvider(FakeBatchProvider):
+    """Answers the router as well: a tool call per step, chosen by the message.
+
+    Satisfies ``ToolCallingProvider``. Two behaviours matter for the tests. It
+    reads worker ids out of the context block it was handed rather than inventing
+    them, the way the real model is told to; and it counts the tool responses
+    already in ``messages`` to know which step of a multi-action message it is on,
+    so "call Abebe and schedule it for three" walks the same two-step path the
+    real model does.
+    """
+
+    name = "fake-tools"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.tool_calls: list[dict[str, Any]] = []
+        #: Set to a tool call to override the routes for the next decision.
+        self.next_call: dict[str, Any] | None = None
+
+    def complete_tool_call(
+        self,
+        *,
+        system: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        if self.next_call is not None:
+            call, self.next_call = self.next_call, None
+            self.tool_calls.append(call)
+            return call
+
+        context = next((entry.get("text", "") for entry in messages if entry.get("role") == "user"), "")
+        spoken = [entry for entry in messages if entry.get("role") == "user"]
+        message = spoken[-1].get("text", "") if len(spoken) > 1 else ""
+        step = len([entry for entry in messages if entry.get("role") == "tool"])
+
+        plan = self._plan(message)
+        call = plan[step] if step < len(plan) else {"name": "answer"}
+        arguments = self._arguments(call.get("arguments", {}), message, context)
+        if call["name"] in {"answer", "ask"} and not arguments.get("text"):
+            arguments = {"text": self._spoken_text(messages, context)}
+        call = {"name": call["name"], "arguments": arguments}
+        self.tool_calls.append(call)
+        return call
+
+    @classmethod
+    def _spoken_text(cls, messages: list[dict[str, Any]], context: str) -> str:
+        """Narrate the last tool result, the way the real model is asked to.
+
+        The service layer deliberately gives acting tools no words of their own:
+        they hand back facts and the model writes the sentence. A fake that spoke
+        no sentence would send every test through ``_fallback_text``, which is the
+        backstop for a confused model rather than the product's voice — so the
+        tests would stop covering the thing they exist to cover.
+        """
+
+        responses = [entry for entry in messages if entry.get("role") == "tool"]
+        if not responses:
+            return cls._counts_text(context)
+        last = responses[-1]
+        result = last.get("response") or {}
+        name = last.get("name")
+        if not result.get("ok"):
+            return f"I could not do that: {result.get('error') or 'no reason given'}."
+        if name == "set_questions":
+            tail = " I tidied the wording." if result.get("rewritten") else ""
+            return f"Saved {result['count']} question(s), age asked first.{tail}"
+        if name == "select_people":
+            people = ", ".join(result.get("selected") or [])
+            return (
+                f"That is {result['count']} people: {people}. Nobody is called until you say so, "
+                f"or give me a time. I retry {result.get('default_retries')} times by default."
+            )
+        if name == "schedule_calls":
+            return f"Set for {result.get('when')}. Tell me to cancel any time before then."
+        if name == "dial_now":
+            failed = result.get("failed") or []
+            tail = " I could not get through to " + ", ".join(failed) + "." if failed else ""
+            return f"Calling {result['count']} now.{tail}"
+        if name == "cancel_selection":
+            return f"Cancelled, and nobody was called. I let {result.get('cleared')} go."
+        if name == "set_language":
+            return f"The interviews will be in {result.get('language')}."
+        return "Done."
+
+    @staticmethod
+    def _counts_text(context: str) -> str:
+        """Quote the counts block back, since quoting it is the whole instruction."""
+
+        quoted = [
+            line.strip()
+            for line in context.splitlines()
+            if line.startswith("  Interviews counted:") or line.startswith("  Excluded and counted nowhere:")
+        ]
+        if quoted:
+            return " ".join(quoted) + "."
+        return "There is nothing counted yet, so there is nothing I can tell you."
+
+    @staticmethod
+    def _plan(message: str) -> list[dict[str, Any]]:
+        """The tools for this message: a marker match, then a shape, then speech."""
+
+        lowered = message.lower()
+        for marker, plan in ROUTES:
+            if marker in lowered:
+                return plan
+        # A numbered or multi-line message is a question set. Checked after the
+        # markers so "call all of them" is never read as a question, and by shape
+        # rather than by keyword because that is what an admin's typing looks like.
+        if re.match(r"^\s*\d+\s*[-.)]", message) or len([l for l in message.splitlines() if l.strip()]) > 1:
+            return [{"name": "set_questions", "arguments": {"questions": "LINES"}}, {"name": "answer"}]
+        return [{"name": "answer"}]
+
+    def _arguments(self, arguments: Any, message: str, context: str) -> dict[str, Any]:
+        """Fill in the markers in a route with what the message actually said.
+
+        The routes cannot hold real arguments, because the worker ids and the
+        timestamp only exist at the moment the call is made.
+        """
+
+        if arguments == "NAMED":
+            return {"mode": "explicit", "worker_ids": self._ids_named_in(message, context)}
+        if arguments == "SCHEDULE":
+            return self._schedule_from(message)
+        filled = dict(arguments)
+        if filled.get("questions") == "LINES":
+            filled["questions"] = [
+                re.sub(r"^\s*\d+\s*[-.)]\s*", "", line).strip()
+                for line in message.splitlines()
+                if line.strip()
+            ]
+        return filled
+
+    @staticmethod
+    def _roster(context: str) -> list[tuple[str, str]]:
+        """``(worker_id, name)`` for everybody in the context block."""
+
+        found = []
+        for line in context.splitlines():
+            parts = [part.strip() for part in line.split("|")]
+            if len(parts) >= 3 and parts[0].startswith("w"):
+                found.append((parts[0], parts[1]))
+        return found
+
+    def _ids_named_in(self, message: str, context: str) -> list[str]:
+        """Worker ids for the names in the message, plus a fabricated one for a stranger.
+
+        A name in the message that is not on the list becomes ``w_invented`` so the
+        service layer's "the model named somebody who is not here" path is
+        exercised, rather than the name being quietly dropped.
+        """
+
+        lowered = message.lower()
+        ids = [
+            worker_id
+            for worker_id, name in self._roster(context)
+            if name.split()[0].lower() in lowered
+        ]
+        known = {name.split()[0].lower() for _, name in self._roster(context)}
+        words = re.findall(r"[a-z]{3,}", lowered.split("call", 1)[-1])
+        strangers = [word for word in words if word not in known and word not in {"and", "the", "them", "for", "this"}]
+        return ids + ["w_invented"] * len(strangers)
+
+    @staticmethod
+    def _schedule_from(message: str) -> dict[str, Any]:
+        """Read the picker's own words back: a timestamp, a zone, a retry count."""
+
+        arguments: dict[str, Any] = {}
+        stamp = re.search(r"(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})", message)
+        if stamp:
+            arguments["when_iso"] = f"{stamp.group(1)}T{stamp.group(2)}"
+        zone = re.search(r"time zone is ([\w/+_-]+)", message)
+        if zone:
+            arguments["timezone"] = zone.group(1)
+        retries = re.search(r"retry (\d+) times", message)
+        if retries:
+            arguments["retries"] = float(retries.group(1))
+        return arguments
+
+
+__all__ = ["ROUTES", "TRANSCRIPTS", "FakeBatchProvider", "FakeToolProvider"]

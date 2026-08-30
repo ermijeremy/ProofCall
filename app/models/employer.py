@@ -21,4 +21,17 @@ class Employer(Base):
     job_positions: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     gender_breakdown: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     age_band_breakdown: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    #: IANA zone, e.g. ``Africa/Addis_Ababa``. Empty until the model has asked.
+    #:
+    #: A company sits in one place, so this belongs here rather than on a round:
+    #: asked once per thread and never again. The model has no clock of its own, so
+    #: "tomorrow at 3" cannot be resolved to an instant without it, and guessing
+    #: telephones twenty people at the wrong hour.
+    timezone: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    #: ``24h`` or ``ethiopian``. Empty until known.
+    #:
+    #: Not pedantry: the numbers are ``+251`` and the interviews are in Amharic,
+    #: where "three o'clock" spoken colloquially is 9:00 AM. One field is cheaper
+    #: than a class of scheduling bug nobody would think to look for.
+    clock_convention: Mapped[str] = mapped_column(String(20), default="", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)

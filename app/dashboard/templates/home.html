@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}Companies · CallProof{% endblock %}
+{% block chrome %}
+<header class="page-head">
+  <a class="brand-link" href="/">CallProof</a>
+</header>
+{% endblock %}
+{% block content %}
+{#
+  The front page is the list of conversations and nothing else: no chat interface
+  here, because a message only means something inside a company's thread.
+
+  Short labels for the pill, beside the sentence the thread itself uses. The
+  sentence says what to do next; the pill is there to be read across a whole grid
+  of cards at once, and a sentence cannot be.
+#}
+{% set labels = {
+  "draft": "Draft",
+  "ready": "Ready",
+  "selected": "Confirm",
+  "scheduled": "Scheduled",
+  "calling": "Calling",
+  "complete": "Complete",
+} %}
+<div class="list-head">
+  <div>
+    <h2>Companies</h2>
+    <p class="muted">{{ companies|length }} {{ "conversation" if companies|length == 1 else "conversations" }}.
+      One thread per company: open a card to upload people, set questions, and call.</p>
+  </div>
+  <button class="primary-button" id="new-company" type="button">+ Add company</button>
+</div>
+
+<div class="company-list" id="company-list">
+  {% for company in companies %}
+  <a class="company-card status-{{ company.status }}" href="/c/{{ company.company_id }}">
+    <div class="card-top">
+      <span class="company-mark">{{ company.name[:2]|upper }}</span>
+      <span class="naming">
+        <strong>{{ company.name }}</strong>
+        <small class="stamp" data-time="{{ company.last_active }}"></small>
+      </span>
+    </div>
+    <span class="pill">{{ labels.get(company.status, company.status) }}</span>
+    <p class="waiting">{{ company.waiting_on }}</p>
+    <div class="stats">
+      <span><b>{{ company.people }}</b> {{ "person" if company.people == 1 else "people" }}</span>
+      <span><b>{{ company.rounds }}</b> {{ "round" if company.rounds == 1 else "rounds" }}</span>
+      <span><b>{{ company.turns }}</b> {{ "message" if company.turns == 1 else "messages" }}</span>
+    </div>
+  </a>
+  {% else %}
+  <div class="empty">
+    <h2>No companies yet</h2>
+    <p>Add a company, upload the people to interview, and type the questions you want them asked.</p>
+    <button class="primary-button" id="new-company-empty" type="button">+ Add company</button>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // "3 hours ago" rather than a timestamp: the only thing the administrator wants
+  // from this field is which conversation they were in last.
+  //
+  // Timestamps are stored as naive UTC, and a browser reads an ISO string with no
+  // offset as local time, which would date every card by the size of the offset.
+  const moment = (stamp) => new Date(/(Z|[+-]\d{2}:?\d{2})$/.test(stamp) ? stamp : `${stamp}Z`);
+
+  function ago(stamp) {
+    const seconds = Math.max(0, (Date.now() - moment(stamp).getTime()) / 1000);
+    const steps = [[60, "second"], [60, "minute"], [24, "hour"], [7, "day"], [4.35, "week"], [12, "month"]];
+    let value = seconds;
+    let unit = "second";
+    for (const [size, name] of steps) {
+      if (value < size) break;
+      value = value / size;
+      unit = name;
+    }
+    if (unit === "second" && value < 45) return "just now";
+    const rounded = Math.round(value);
+    return `${rounded} ${unit}${rounded === 1 ? "" : "s"} ago`;
+  }
+
+  for (const element of document.querySelectorAll(".stamp[data-time]")) {
+    element.textContent = ago(element.dataset.time);
+  }
+
+  async function addCompany(button) {
+    const name = window.prompt("Company name");
+    if (name === null) return;
+    button.disabled = true;
+    try {
+      const response = await fetch("/api/companies", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({name: name.trim() || null}),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.detail || "Could not add the company");
+      // Straight into the thread: the next thing to do is upload the people, and
+      // that only happens inside the conversation.
+      window.location.href = `/c/${body.company_id}`;
+    } catch (error) {
+      window.alert(error.message);
+      button.disabled = false;
+    }
+  }
+
+  for (const id of ["new-company", "new-company-empty"]) {
+    const button = document.getElementById(id);
+    if (button) button.addEventListener("click", () => addCompany(button));
+  }
+</script>
+{% endblock %}

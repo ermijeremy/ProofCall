@@ -1,0 +1,516 @@
+/* The two pages an administrator uses: the list of companies, and one company's
+   conversation. Written unminified, unlike dashboard.css, because this is the
+   part of the interface that is still changing. It reuses the tokens declared
+   there and adds a few of its own below.
+
+   There is no sidebar and no side panel here. One thread per company means the
+   conversation is the whole page, and every fact that used to sit in a side card
+   is now said in the thread where it can be argued with. */
+
+:root {
+  --shadow-card: 0 1px 2px rgba(23, 32, 51, .04), 0 8px 24px rgba(23, 32, 51, .06);
+  --shadow-lift: 0 2px 4px rgba(23, 32, 51, .05), 0 18px 40px rgba(23, 32, 51, .12);
+  --ring: 0 0 0 3px rgba(13, 138, 131, .16);
+}
+
+body { -webkit-font-smoothing: antialiased; }
+
+/* -- the header both pages share ----------------------------------------- */
+
+.page-head {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 15px 5.5%;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, .88);
+  backdrop-filter: blur(10px);
+}
+
+.brand-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font: 700 17px 'Space Grotesk', sans-serif;
+  letter-spacing: -.02em;
+  text-decoration: none;
+}
+
+/* The mark is drawn rather than loaded: one round element in the brand colour is
+   enough to make the header look deliberate, and it cannot fail to load. */
+.brand-link::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--teal);
+  box-shadow: 0 0 0 4px var(--teal-soft);
+}
+
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  color: var(--muted);
+  background: var(--paper);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.back-link:hover { border-color: var(--teal); color: var(--teal); }
+
+.head-title { min-width: 0; flex: 1; }
+
+.head-title h1 {
+  margin: 0;
+  font: 600 17px 'Space Grotesk', sans-serif;
+  letter-spacing: -.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.head-title p { margin: 3px 0 0; font-size: 12px; }
+.page-head h1 { margin: 0; font: 600 18px 'DM Sans', sans-serif; }
+.page-head .primary-button { margin-left: auto; }
+
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+
+/* -- buttons ------------------------------------------------------------- */
+
+.primary-button, .ghost-button {
+  padding: 10px 16px;
+  border-radius: 10px;
+  font: 600 13px 'DM Sans', sans-serif;
+  cursor: pointer;
+  transition: background .15s, border-color .15s, color .15s, transform .1s, box-shadow .15s;
+}
+
+.primary-button {
+  border: 0;
+  background: var(--teal);
+  color: #fff;
+  box-shadow: 0 1px 2px rgba(13, 138, 131, .3);
+}
+
+.primary-button:hover { background: #0b7a74; box-shadow: 0 4px 14px rgba(13, 138, 131, .28); }
+.primary-button:active, .ghost-button:active { transform: translateY(1px); }
+.ghost-button { border: 1px solid var(--line); background: var(--paper); color: var(--ink); }
+.ghost-button:hover { border-color: var(--teal); color: var(--teal); }
+.primary-button:disabled, .ghost-button:disabled { opacity: .6; cursor: progress; transform: none; }
+
+/* -- the list of companies ----------------------------------------------- */
+
+.list-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 4px 0 22px;
+}
+
+.list-head h2 {
+  margin: 0;
+  font: 700 24px 'Space Grotesk', sans-serif;
+  letter-spacing: -.03em;
+}
+
+.list-head p { margin: 5px 0 0; font-size: 13px; }
+
+/* A flexible grid rather than a fixed column count: the cards are the same width
+   on a laptop and on a phone, and the number per row is whatever fits. */
+.company-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(272px, 1fr));
+  gap: 16px;
+}
+
+.company-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 18px 15px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--paper);
+  box-shadow: var(--shadow-card);
+  text-decoration: none;
+  transition: transform .16s, box-shadow .16s, border-color .16s;
+}
+
+/* A hairline in the status colour along the top edge, so a row of cards can be
+   read at a glance without reading any of the words. */
+.company-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  background: var(--accent, var(--line));
+}
+
+.company-card:hover {
+  transform: translateY(-3px);
+  border-color: #d7e0ec;
+  box-shadow: var(--shadow-lift);
+}
+
+.company-card .card-top { display: flex; align-items: center; gap: 12px; min-width: 0; }
+
+.company-mark {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  border-radius: 13px;
+  background: var(--accent-soft, #eef1f6);
+  color: var(--accent, var(--muted));
+  font: 700 15px 'Space Grotesk', sans-serif;
+  letter-spacing: .02em;
+}
+
+.company-card .naming { min-width: 0; flex: 1; }
+
+.company-card strong {
+  display: block;
+  font: 600 15px 'DM Sans', sans-serif;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.company-card .stamp { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
+
+.company-card .waiting {
+  margin: 0;
+  color: #55637a;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.company-card .stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: auto;
+  padding-top: 13px;
+  border-top: 1px solid #f1f4f9;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.company-card .stats b { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 5px 11px;
+  border-radius: 99px;
+  background: var(--accent-soft, #eef1f6);
+  color: var(--accent, var(--muted));
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.pill::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* The status colours. Set once on the card so the hairline, the initials block
+   and the pill all agree without repeating themselves. */
+.status-draft { --accent: #7887a0; --accent-soft: #eef1f6; }
+.status-ready { --accent: var(--blue); --accent-soft: #edf2ff; }
+.status-selected { --accent: var(--amber); --accent-soft: var(--amber-soft); }
+.status-scheduled { --accent: #6b46c1; --accent-soft: #f1ecfd; }
+.status-calling { --accent: var(--teal); --accent-soft: var(--teal-soft); }
+.status-complete { --accent: #2f855a; --accent-soft: #e6f6ed; }
+
+/* Calls in flight are the one state worth animating: it is the only one that
+   changes without the administrator doing anything. */
+.status-calling .pill::before { animation: pulse 1.4s ease-in-out infinite; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: .45; transform: scale(.7); }
+}
+
+.empty {
+  grid-column: 1 / -1;
+  padding: 64px 24px;
+  border: 1px dashed #d9e1ec;
+  border-radius: 18px;
+  background: var(--paper);
+  text-align: center;
+}
+
+.empty h2 { margin: 0 0 8px; font: 700 20px 'Space Grotesk', sans-serif; letter-spacing: -.02em; }
+.empty p { margin: 0 auto 20px; max-width: 46ch; color: var(--muted); font-size: 14px; line-height: 1.6; }
+
+/* -- the conversation ---------------------------------------------------- */
+
+.thread {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 880px;
+  margin: 0 auto;
+  /* Room for the input box, which floats over the bottom of the page. */
+  padding-bottom: 150px;
+}
+
+.turn { display: flex; max-width: 100%; }
+.turn-admin { justify-content: flex-end; }
+
+/* New turns slide in rather than appearing, which is what makes the optimistic
+   echo of a just-sent message read as a send and not as a repaint. */
+.turn-new { animation: rise .22s ease-out; }
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+.bubble {
+  position: relative;
+  max-width: 74ch;
+  padding: 14px 17px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  box-shadow: var(--shadow-card);
+  font-size: 14.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.turn-agent .bubble { border-bottom-left-radius: 6px; }
+
+.turn-admin .bubble {
+  border-color: transparent;
+  border-bottom-right-radius: 6px;
+  background: linear-gradient(135deg, #1b3554, var(--navy));
+  color: #eef3fa;
+  box-shadow: 0 8px 22px rgba(22, 35, 55, .18);
+}
+
+.bubble time {
+  display: block;
+  margin-top: 8px;
+  color: #9aa5b4;
+  font-size: 10px;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+.turn-admin .bubble time { color: #91a6bf; }
+
+/* A message that is on screen but not yet acknowledged by the server. Dimmed so
+   it is honest about being unconfirmed, and never carrying a card. */
+.turn-pending .bubble { opacity: .72; }
+.turn-pending .bubble time { font-style: italic; }
+
+/* The reply is being written. Three dots is the whole message: the model is
+   thinking, and the page has nothing truer to say yet. */
+.typing .bubble { display: flex; align-items: center; gap: 5px; padding: 17px; }
+
+.typing i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #b6c0cf;
+  animation: blink 1.2s ease-in-out infinite;
+}
+
+.typing i:nth-child(2) { animation-delay: .18s; }
+.typing i:nth-child(3) { animation-delay: .36s; }
+
+@keyframes blink {
+  0%, 80%, 100% { opacity: .35; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-3px); }
+}
+
+/* A card on an older turn refers to a selection that has already been called or
+   replaced, so its buttons are dimmed and ignored rather than left as a trap. */
+.attachment.spent .card-actions { display: none; }
+.attachment.spent .card { opacity: .72; }
+
+.card {
+  margin-top: 13px;
+  padding: 14px 15px;
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px solid var(--line);
+  white-space: normal;
+}
+
+.card h4 {
+  margin: 0 0 10px;
+  font: 700 10px 'DM Sans', sans-serif;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--teal);
+}
+
+.card ol, .card ul { margin: 0; padding-left: 18px; font-size: 13.5px; line-height: 1.6; }
+.card li { margin-bottom: 5px; }
+.card li::marker { color: var(--muted); }
+.card p.muted { margin: 10px 0 0; }
+.card .foot { margin: 10px 0 0; color: var(--muted); font-size: 12px; }
+
+.card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 13px;
+}
+
+.card-actions .primary-button, .card-actions .ghost-button { padding: 8px 14px; font-size: 12.5px; }
+
+.field { display: block; margin-bottom: 11px; }
+
+.field span {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.field input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+  color: inherit;
+  font: 400 14px 'DM Sans', sans-serif;
+}
+
+.field input:focus { outline: 0; border-color: var(--teal); box-shadow: var(--ring); }
+
+.count-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+  font-size: 13.5px;
+  border-bottom: 1px solid var(--line);
+}
+
+.count-row:last-child { border-bottom: 0; }
+.count-row b { font-variant-numeric: tabular-nums; }
+.card .question-text { margin: 15px 0 5px; font-size: 13.5px; font-weight: 600; }
+.card .question-text:first-child { margin-top: 0; }
+.excluded-note { margin: 10px 0 0; color: var(--red); font-size: 12px; }
+
+/* The administrator's shorthand, kept beside the question that will be read
+   aloud. Muted and smaller: the spoken wording is what matters, but a rewrite
+   they cannot see is a rewrite they cannot correct. */
+.as-typed {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: italic;
+  margin-top: 3px;
+}
+
+/* -- the one input box --------------------------------------------------- */
+
+.composer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 4;
+  padding: 22px 32px 20px;
+  background: linear-gradient(to top, var(--canvas) 58%, rgba(246, 248, 251, 0));
+}
+
+.composer form {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--paper);
+  box-shadow: 0 10px 30px rgba(23, 32, 51, .1);
+  transition: border-color .15s, box-shadow .15s;
+}
+
+.composer form:focus-within { border-color: #bfd9d6; box-shadow: 0 10px 30px rgba(23, 32, 51, .1), var(--ring); }
+
+.composer textarea {
+  flex: 1;
+  min-height: 28px;
+  max-height: 168px;
+  padding: 6px 2px;
+  border: 0;
+  outline: 0;
+  resize: none;
+  background: transparent;
+  color: inherit;
+  font: 400 14.5px 'DM Sans', sans-serif;
+  line-height: 1.5;
+}
+
+.composer textarea::placeholder { color: #9aa5b4; }
+
+.icon-button, .send-button {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 12px;
+  cursor: pointer;
+  font-size: 16px;
+  transition: background .15s, transform .1s;
+}
+
+.icon-button { background: #eef1f6; color: var(--ink); }
+.icon-button:hover { background: #e2e7ef; }
+.send-button { background: var(--teal); color: #fff; }
+.send-button:hover { background: #0b7a74; }
+.icon-button:active, .send-button:active { transform: translateY(1px); }
+.send-button:disabled, .icon-button:disabled { opacity: .5; cursor: progress; transform: none; }
+
+.composer-hint {
+  max-width: 880px;
+  margin: 9px auto 0;
+  color: var(--muted);
+  font-size: 11.5px;
+  text-align: center;
+}
+
+@media (max-width: 680px) {
+  .page-head { padding: 13px 18px; gap: 12px; }
+  .list-head { display: block; }
+  .list-head .primary-button { margin-top: 14px; }
+  .company-list { grid-template-columns: 1fr; }
+  .bubble { max-width: 100%; }
+  .composer { padding: 16px 14px 14px; }
+  .thread { padding-bottom: 140px; }
+}

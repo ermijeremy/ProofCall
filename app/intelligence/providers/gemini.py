@@ -50,8 +50,6 @@ ROTATABLE_ERRORS = (
     "no longer available",
 )
 
-#: Substrings marking a key that will never work. These are parked after one
-#: failure instead of being retried on every later call.
 #: Transport failures, which say nothing at all about the key. These are retried
 #: on a fresh key — a new key means a new client and a new connection — but only
 #: ``MAX_TRANSPORT_RETRIES`` times, because a network that is down stays down and
@@ -77,6 +75,8 @@ TRANSPORT_ERRORS = (
 MAX_TRANSPORT_RETRIES = 3
 
 
+#: Substrings marking a key that will never work. These are parked after one
+#: failure instead of being retried on every later call.
 DEAD_KEY_ERRORS = (
     "401",
     "403",
@@ -197,6 +197,26 @@ def api_key_from_environment() -> str | None:
     return keys[0] if keys else None
 
 
+def _signature_for(response: Any, name: str) -> Any:
+    """The thought signature Gemini attached to the function call it chose.
+
+    Gemini 3 signs each function call and refuses to accept the call back in a
+    later turn without that signature. It is opaque bytes, valid only inside the
+    conversation that produced it, so it is passed straight back and never stored
+    or logged.
+    """
+
+    for candidate in getattr(response, "candidates", None) or []:
+        content = getattr(candidate, "content", None)
+        for part in getattr(content, "parts", None) or []:
+            call = getattr(part, "function_call", None)
+            if call is not None and getattr(call, "name", None) == name:
+                signature = getattr(part, "thought_signature", None)
+                if signature:
+                    return signature
+    return None
+
+
 class GeminiProvider:
     """Extraction through the unified ``google-genai`` SDK.
 
@@ -286,6 +306,39 @@ class GeminiProvider:
         return live[start:] + live[:start]
 
     def complete_json(self, *, system: str, user: str) -> dict[str, Any]:
+        """One request returning JSON, tried across keys until one answers."""
+
+        return self._rotate(lambda key: self._call_once(key, system=system, user=user))
+
+    def complete_tool_call(
+        self,
+        *,
+        system: str,
+        messages: Sequence[dict[str, Any]],
+        tools: Sequence[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Ask the model to choose one of ``tools`` and return the call it chose.
+
+        This is real function calling, not JSON mode with the shape described in
+        prose: the declarations go to the API as declarations, and
+        ``function_calling_config.mode = "ANY"`` makes a call mandatory. A router
+        that must always act cannot accept "here is some prose instead", which is
+        exactly what JSON mode permits.
+        """
+
+        return self._rotate(
+            lambda key: self._tool_call_once(key, system=system, messages=messages, tools=tools)
+        )
+
+    def _rotate(self, attempt: Any) -> dict[str, Any]:
+        """Run ``attempt(key)`` across live keys until one succeeds.
+
+        Every retry rule lives here so both call shapes obey the same ones: a dead
+        key is parked, a transport failure is ridden out on a fresh key up to
+        ``MAX_TRANSPORT_RETRIES``, a rotatable failure moves on, and anything else
+        is the model's real answer and is raised immediately.
+        """
+
         order = self._attempt_order()
         if not order:
             raise ProviderError(
@@ -296,7 +349,7 @@ class GeminiProvider:
         transport_failures = 0
         for key in order:
             try:
-                return self._call_once(key, system=system, user=user)
+                return attempt(key)
             except ProviderError as exc:
                 message = str(exc)
                 failures.append(f"{mask_key(key)}: {message}")
@@ -324,6 +377,110 @@ class GeminiProvider:
         raise ProviderError(
             f"All {len(order)} Gemini key(s) failed. " + " | ".join(failures[-3:])
         )
+
+    def _tool_call_once(
+        self,
+        key: str,
+        *,
+        system: str,
+        messages: Sequence[dict[str, Any]],
+        tools: Sequence[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """One forced function call on one key.
+
+        ``messages`` is ``[{"role": "user" | "model", "text": str}]`` plus, for a
+        second round, ``{"role": "tool", "name": str, "response": dict}``. Sending
+        the tool result back is what lets one admin message produce two actions —
+        select the people, then schedule the calls — without the caller having to
+        re-derive context it already gave the model.
+        """
+
+        try:
+            from google.genai import types
+        except ImportError as exc:  # pragma: no cover - depends on the install
+            raise ProviderError("google-genai is not installed") from exc
+
+        declarations = [
+            types.FunctionDeclaration(
+                name=tool["name"],
+                description=tool.get("description", ""),
+                parameters=tool.get("parameters") or {"type": "object", "properties": {}},
+            )
+            for tool in tools
+        ]
+
+        contents: list[Any] = []
+        for message in messages:
+            role = message.get("role", "user")
+            if role == "tool":
+                contents.append(
+                    types.Content(
+                        role="user",
+                        parts=[
+                            types.Part.from_function_response(
+                                name=message["name"], response=message.get("response") or {}
+                            )
+                        ],
+                    )
+                )
+                continue
+            if role == "model" and message.get("call"):
+                # The model's own previous call has to be replayed, or the function
+                # response below refers to a call this conversation never contains
+                # and the API rejects the turn.
+                part = types.Part.from_function_call(
+                    name=message["call"]["name"], args=message["call"].get("arguments") or {}
+                )
+                # Gemini 3 signs every function call and rejects a replayed call
+                # that comes back without its signature:
+                # "Function call is missing a thought_signature in functionCall
+                # parts". The signature is opaque and short-lived, so it is carried
+                # through the router in memory and never stored.
+                signature = message["call"].get("signature")
+                if signature:
+                    part.thought_signature = signature
+                contents.append(types.Content(role="model", parts=[part]))
+                continue
+            contents.append(
+                types.Content(
+                    role="model" if role == "model" else "user",
+                    parts=[types.Part.from_text(text=message.get("text") or "")],
+                )
+            )
+
+        client = self._client_for(key)
+        try:
+            response = client.models.generate_content(
+                model=self.model,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=system,
+                    temperature=self.temperature,
+                    tools=[types.Tool(function_declarations=declarations)],
+                    tool_config=types.ToolConfig(
+                        function_calling_config=types.FunctionCallingConfig(mode="ANY")
+                    ),
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001 - any SDK failure is a provider failure
+            raise ProviderError(f"Gemini request failed: {exc}") from exc
+
+        calls = getattr(response, "function_calls", None) or []
+        if not calls:
+            # Forced mode is supposed to prevent this. When it happens anyway the
+            # caller must not silently do nothing, so it is a provider failure
+            # rather than an empty result that reads like a considered decision.
+            text = (getattr(response, "text", None) or "").strip()
+            raise ProviderError(
+                f"Gemini chose no tool despite forced mode; it replied with text: {text[:200]!r}"
+            )
+
+        chosen = calls[0]
+        return {
+            "name": chosen.name,
+            "arguments": dict(chosen.args or {}),
+            "signature": _signature_for(response, chosen.name),
+        }
 
     def _call_once(self, key: str, *, system: str, user: str) -> dict[str, Any]:
         """One request on one key. Every failure leaves as :class:`ProviderError`."""

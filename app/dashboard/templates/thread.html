@@ -1,0 +1,362 @@
+{% extends "base.html" %}
+{% block title %}{{ thread.name }} · CallProof{% endblock %}
+{% block chrome %}
+<header class="page-head">
+  <a class="back-link" href="/">← Companies</a>
+  <div class="head-title">
+    <h1 id="company-name">{{ thread.name }}</h1>
+    <p class="muted" id="waiting-on">{{ thread.waiting_on }}</p>
+  </div>
+</header>
+{% endblock %}
+{% block content %}
+<div class="thread" id="thread"></div>
+
+<div class="composer">
+  <form id="composer">
+    <input type="file" id="file" accept=".csv" hidden>
+    <button class="icon-button" id="attach" type="button" title="Upload a CSV of names and phone numbers">📎</button>
+    <textarea id="text" rows="1" placeholder="Type your questions, or say who to call…"></textarea>
+    <button class="send-button" id="send" type="submit" title="Send">↑</button>
+  </form>
+  <p class="composer-hint" id="hint"></p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const COMPANY_ID = "{{ thread.company_id }}";
+  // Rendered server-side first, so the conversation is on screen before any fetch.
+  const INITIAL = {{ thread|tojson }};
+  const thread = document.getElementById("thread");
+  const form = document.getElementById("composer");
+  const textarea = document.getElementById("text");
+  const fileInput = document.getElementById("file");
+  const sendButton = document.getElementById("send");
+  const attachButton = document.getElementById("attach");
+
+  // What the one input box is for right now. Said out loud rather than left for
+  // the administrator to guess, because the box accepts anything.
+  const HINTS = {
+    draft: "Upload a CSV with a name column and a phone number column, then type your questions.",
+    ready: "Say who to call — everyone, half of them at random, or a few by name.",
+    selected: "Say yes to call them now, or give a time, or say no to choose different people.",
+    scheduled: "The calls are booked. Say cancel to stop them, or ask me anything.",
+    calling: "The interviews are running. Ask how it is going at any time.",
+    complete: "Ask anything about the answers. Every figure is counted, never guessed.",
+  };
+
+  // The administrator's own zone, so a time picker means what it looks like it
+  // means. Only ever a suggestion: the company's zone is what gets stored.
+  const BROWSER_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+
+  // Three pieces of state, kept apart on purpose. `server` is what the database
+  // says; `pending` is what the administrator has done that the server has not
+  // acknowledged yet; `waiting` is whether a reply is on its way. Repainting from
+  // all three is what makes a sent message appear at once instead of after the
+  // model has finished thinking.
+  let server = INITIAL;
+  let pending = [];
+  let waiting = false;
+  let painted = 0;
+  let polling = null;
+
+  const escape = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => (
+    {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[character]
+  ));
+
+  // Timestamps are stored as naive UTC, and a browser reads an ISO string with no
+  // offset as local time — which would put every message hours out of place. The
+  // zone is stated here rather than guessed.
+  const moment = (stamp) => new Date(/(Z|[+-]\d{2}:?\d{2})$/.test(stamp) ? stamp : `${stamp}Z`);
+
+  const clock = (stamp) => moment(stamp).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
+
+  const plural = (count, one, many) => `${count} ${count === 1 ? one : many}`;
+
+  function summaryCard(summary) {
+    const blocks = Object.values(summary.questions || {}).map((question) => {
+      const counts = Object.entries(question.category_counts || {});
+      const rows = counts.length
+        ? counts.map(([name, total]) => `<div class="count-row"><span>${escape(name)}</span><b>${total}</b></div>`).join("")
+        : `<div class="count-row"><span>No answers grouped yet</span><b>0</b></div>`;
+      return `<p class="question-text">${escape(question.question)}</p>${rows}`;
+    }).join("");
+    const excluded = (summary.excluded || [])
+      .map((record) => `<p class="excluded-note">${escape(record.name)} — ${escape(record.reason)}</p>`)
+      .join("");
+    return `<div class="card"><h4>${summary.interviews_counted} counted · ${summary.excluded_total} left out</h4>${blocks}${excluded}</div>`;
+  }
+
+  function questionsCard(payload) {
+    // Both wordings appear when they differ: the person on the phone hears the
+    // rewritten question, so a rewrite the administrator cannot see is one they
+    // cannot correct.
+    const items = (payload.questions || []).map((question) => {
+      const typed = question.original && question.original !== question.text
+        ? `<div class="as-typed">you typed: ${escape(question.original)}</div>`
+        : "";
+      return `<li>${escape(question.text)}${typed}</li>`;
+    }).join("");
+    return `<div class="card"><h4>Questions to ask</h4><ol>${items}</ol></div>`;
+  }
+
+  function peopleCard(payload) {
+    const rows = payload.people || [];
+    const items = rows.map((person) =>
+      `<li>${escape(person.name)} — ${escape(person.phone_number)}</li>`).join("");
+    const skipped = (payload.skipped || []).length
+      ? `<p class="excluded-note">Left out: ${escape(payload.skipped.join("; "))}</p>`
+      : "";
+    // The list is the rows in the file that was just uploaded; the total is the
+    // whole company list, and after a second upload those are different numbers.
+    // Both are labelled, because a heading that counts one and a list that shows
+    // the other reads as a bug.
+    return `<div class="card">
+        <h4>${plural(rows.length, "person in this file", "people in this file")}</h4>
+        <ul>${items}</ul>${skipped}
+        <p class="foot">${plural(payload.total || 0, "person", "people")} on the list altogether.</p>
+      </div>`;
+  }
+
+  function selectionCard(payload) {
+    const items = (payload.selected || []).map((name) => `<li>${escape(name)}</li>`).join("");
+    const confirm = payload.confirm
+      ? `<div class="card-actions">
+           <button class="primary-button" data-say="yes, call them now">Call them now</button>
+           <button class="ghost-button" data-picker="when">Pick a time</button>
+           <button class="ghost-button" data-say="no, do not call anybody">Cancel</button>
+         </div>`
+      : "";
+    return `<div class="card"><h4>${plural((payload.selected || []).length, "person to call", "people to call")}</h4><ul>${items}</ul>${confirm}</div>`;
+  }
+
+  function schedulePickerCard(payload) {
+    const missing = payload.missing || ["when"];
+    const zone = payload.timezone || BROWSER_ZONE;
+    const when = missing.includes("when")
+      ? `<label class="field"><span>Date and time</span><input type="datetime-local" data-field="when"></label>`
+      : "";
+    const zoneField = missing.includes("timezone")
+      ? `<label class="field"><span>Time zone</span><input type="text" data-field="timezone" value="${escape(zone)}" placeholder="Africa/Addis_Ababa"></label>`
+      : "";
+    // Written out, not a stepper: the number of attempts is a promise about how
+    // many times somebody's telephone will ring.
+    const retries = `<label class="field"><span>Retry attempts if nobody answers</span>
+      <input type="number" min="0" max="5" step="1" data-field="retries" value="${payload.default_retries}"></label>`;
+    return `<div class="card">
+        <h4>When should the calls go out?</h4>
+        ${when}${zoneField}${retries}
+        <p class="muted small">Calls only go out between ${escape(payload.calling_window || "")}.
+          You can also just tell me in words — "tomorrow at three".</p>
+        <div class="card-actions"><button class="primary-button" data-schedule="1">Book it</button></div>
+      </div>`;
+  }
+
+  function scheduledCard(payload) {
+    const defaulted = payload.defaulted ? " (the default)" : "";
+    return `<div class="card">
+        <h4>Booked</h4>
+        <div class="count-row"><span>${escape(payload.when)}</span><b>${payload.people}</b></div>
+        <p class="muted small">${plural(payload.retries, "retry attempt", "retry attempts")}${defaulted} if nobody answers.</p>
+        <div class="card-actions"><button class="ghost-button" data-say="cancel the scheduled calls">Cancel</button></div>
+      </div>`;
+  }
+
+  function dialingCard(payload) {
+    const dialed = (payload.dialed || []).map((name) => `<li>${escape(name)}</li>`).join("");
+    const failed = (payload.failed || []).length
+      ? `<p class="excluded-note">Could not get through to ${escape(payload.failed.join(", "))}.</p>`
+      : "";
+    return `<div class="card"><h4>${plural((payload.dialed || []).length, "call placed", "calls placed")}</h4><ul>${dialed}</ul>${failed}</div>`;
+  }
+
+  function card(payload) {
+    if (!payload || !payload.kind) return "";
+    if (payload.kind === "cards") return (payload.cards || []).map(card).join("");
+    if (payload.kind === "summary" && payload.summary) return summaryCard(payload.summary);
+    if (payload.kind === "questions") return questionsCard(payload);
+    if (payload.kind === "roster") return peopleCard(payload);
+    if (payload.kind === "selection") return selectionCard(payload);
+    if (payload.kind === "schedule_picker") return schedulePickerCard(payload);
+    if (payload.kind === "scheduled") return scheduledCard(payload);
+    if (payload.kind === "dialing") return dialingCard(payload);
+    return "";
+  }
+
+  function turn(message, index, total) {
+    // Only the newest card is interactive. An old "Call them now" button is a
+    // trap: the selection it referred to has already been called or replaced.
+    const live = index === total - 1;
+    const unsent = message.pending ? " turn-pending" : "";
+    // Turns that were not on screen the last time this ran slide in, so a send
+    // looks like a send rather than a redraw of the whole conversation.
+    const fresh = index >= painted ? " turn-new" : "";
+    const stamp = message.pending ? "sending…" : clock(message.created_at);
+    return `<div class="turn turn-${escape(message.role)}${unsent}${fresh}">
+        <div class="bubble">${escape(message.text)}
+          <div class="attachment${live ? "" : " spent"}">${card(message.payload)}</div>
+          <time>${stamp}</time>
+        </div>
+      </div>`;
+  }
+
+  function paint() {
+    const messages = (server.messages || []).concat(pending);
+    const dots = waiting
+      ? `<div class="turn turn-agent typing turn-new"><div class="bubble"><i></i><i></i><i></i></div></div>`
+      : "";
+    thread.innerHTML = messages.map((message, index) => turn(message, index, messages.length)).join("") + dots;
+    painted = messages.length;
+
+    document.getElementById("company-name").textContent = server.name;
+    document.getElementById("waiting-on").textContent = server.waiting_on || "";
+    document.getElementById("hint").textContent = HINTS[server.status] || "";
+    window.scrollTo({top: document.body.scrollHeight});
+
+    // Poll only while calls are in flight or booked; nothing else changes unless
+    // the administrator sends something.
+    const moving = server.status === "calling" || server.status === "scheduled";
+    if (moving && polling === null) {
+      polling = window.setInterval(refresh, 4000);
+    } else if (!moving && polling !== null) {
+      window.clearInterval(polling);
+      polling = null;
+    }
+  }
+
+  function settle(payload) {
+    // The server's version of the conversation replaces the optimistic one whole:
+    // it contains the administrator's message as it was actually stored, so
+    // keeping the echo as well would show it twice.
+    server = payload;
+    pending = [];
+    waiting = false;
+    paint();
+  }
+
+  async function refresh() {
+    // A poll never overwrites a send that is still in flight.
+    if (waiting) return;
+    const response = await fetch(`/api/companies/${COMPANY_ID}`);
+    if (response.ok && !waiting) settle(await response.json());
+  }
+
+  function busy(state) {
+    sendButton.disabled = state;
+    attachButton.disabled = state;
+  }
+
+  async function post(path, options) {
+    busy(true);
+    try {
+      const response = await fetch(path, options);
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.detail || "That did not go through");
+      settle(body.thread);
+    } catch (error) {
+      // The optimistic turn is dropped, not left behind: it never reached the
+      // server, and a message that is still on screen looks like one that was
+      // sent.
+      pending = [];
+      waiting = false;
+      paint();
+      window.alert(error.message);
+    } finally {
+      busy(false);
+      textarea.focus();
+    }
+  }
+
+  function echo(text) {
+    // On screen before the request leaves, so the conversation moves at typing
+    // speed and not at the model's speed. Marked pending until the server agrees.
+    pending.push({role: "admin", text, created_at: new Date().toISOString(), pending: true});
+    waiting = true;
+    paint();
+  }
+
+  function say(text) {
+    // Every button says something in words and posts it as a message, so the
+    // model reads it exactly as it reads anything typed. There is no second,
+    // hidden way to reach an action.
+    echo(text);
+    post(`/api/companies/${COMPANY_ID}/messages`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({text}),
+    });
+  }
+
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const text = textarea.value.trim();
+    if (!text || waiting) return;
+    textarea.value = "";
+    textarea.style.height = "auto";
+    say(text);
+  });
+
+  thread.addEventListener("click", (event) => {
+    const button = event.target.closest("button");
+    if (!button || button.closest(".spent") || waiting) return;
+
+    if (button.dataset.say) {
+      say(button.dataset.say);
+      return;
+    }
+    if (button.dataset.picker) {
+      say("schedule it for later — ask me for the time");
+      return;
+    }
+    if (!button.dataset.schedule) return;
+
+    const holder = button.closest(".card");
+    const value = (field) => {
+      const input = holder.querySelector(`[data-field="${field}"]`);
+      return input ? input.value.trim() : "";
+    };
+    const when = value("when");
+    if (holder.querySelector('[data-field="when"]') && !when) {
+      window.alert("Pick a date and time first.");
+      return;
+    }
+    const parts = [];
+    if (when) parts.push(`schedule the calls for ${when.replace("T", " ")}`);
+    const zone = value("timezone");
+    if (zone) parts.push(`the time zone is ${zone}`);
+    const retries = value("retries");
+    if (retries !== "") parts.push(`retry ${retries} times if nobody answers`);
+    say(parts.join(", "));
+  });
+
+  attachButton.addEventListener("click", () => fileInput.click());
+
+  fileInput.addEventListener("change", () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+    const data = new FormData();
+    data.append("file", file);
+    fileInput.value = "";
+    echo(`Uploading ${file.name}`);
+    post(`/api/companies/${COMPANY_ID}/upload`, {method: "POST", body: data});
+  });
+
+  textarea.addEventListener("input", () => {
+    textarea.style.height = "auto";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 168)}px`;
+  });
+
+  textarea.addEventListener("keydown", (event) => {
+    // Enter sends, shift+enter is a newline. Questions arrive as several lines,
+    // so both have to work.
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      form.requestSubmit();
+    }
+  });
+
+  paint();
+  textarea.focus();
+</script>
+{% endblock %}

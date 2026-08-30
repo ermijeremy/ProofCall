@@ -5,26 +5,22 @@
   <title>{% block title %}CallProof{% endblock %}</title>
   <link rel="stylesheet" href="/static/dashboard.css">
   <link rel="stylesheet" href="/static/dashboard_extra.css">
-  <link rel="stylesheet" href="/static/batch.css">
+  <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-<div class="app-shell">
-  <aside class="sidebar">
-    <a class="brand" href="/api/dashboard"><span class="brand-mark">✓</span><span>CallProof<small>Evidence monitor</small></span></a>
-    <div class="nav-label">Workspace</div>
-    <nav class="side-nav">
-      <a href="/api/dashboard" class="nav-item"><span>▤</span>Interview batches</a>
-      <a href="/api/dashboard/calls" class="nav-item"><span>◉</span>Live calls</a>
-      <a href="/api/dashboard/programme" class="nav-item"><span>▦</span>Programme report</a>
-      <a href="/api/dashboard/setup" class="nav-item"><span>⚙</span>Admin setup</a>
-    </nav>
-    <div class="sidebar-footer"><span class="online-dot"></span>System operational</div>
-  </aside>
-  <section class="page-shell">
-    <header class="topbar"><div><div class="eyebrow">CALLPROOF / MONITORING</div><h1>{% block page_title %}Programme overview{% endblock %}</h1></div><div class="topbar-meta"><span class="live-pill"><span class="online-dot"></span>Live workspace</span><span class="avatar">CP</span></div></header>
-    <main class="content">{% block content %}{% endblock %}</main>
-  </section>
-</div>
+{#
+  No sidebar and no status bar. There is one thread per company, so navigation is
+  a list of companies and a link back to it; anything else would be chrome around
+  a chat window. Pages that are not the thread override `chrome` or leave this
+  slim header in place.
+#}
+{% block chrome %}
+<header class="page-head">
+  <a class="brand-link" href="/">CallProof</a>
+  <h1>{% block page_title %}Programme report{% endblock %}</h1>
+</header>
+{% endblock %}
+<main class="content">{% block content %}{% endblock %}</main>
 {% block scripts %}{% endblock %}
 </body>
 </html>

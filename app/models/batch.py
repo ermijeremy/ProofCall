@@ -13,7 +13,7 @@ batch, which no closed literal can describe in advance.
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, JSON, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -32,16 +32,18 @@ class InterviewBatch(Base):
     questions: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, nullable=False)
     #: Pass-two output: ``{slug: {"categories": [...], "assignments": {...}}}``.
     categories: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
-    #: The worker ids this batch imported, in CSV order. A batch is one round of
-    #: interviews over one uploaded list, so its roster cannot be "everyone in the
-    #: company": a second batch would inherit the first batch's people, and two
-    #: employees with the same name from two different CSVs would make every name
-    #: ambiguous. Empty means a batch created before this column existed, which
-    #: falls back to the company roster.
-    roster_worker_ids: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     language: Mapped[str] = mapped_column(String(20), default="am", nullable=False)
-    #: draft -> ready -> selected -> calling -> complete
+    #: draft -> ready -> selected -> (scheduled) -> calling -> complete
     status: Mapped[str] = mapped_column(String(30), default="draft", nullable=False, index=True)
+    #: When the selected calls should be placed, in UTC. Null means "when the admin
+    #: confirms". Stored in UTC and rendered back in the company's zone, because a
+    #: naive local timestamp is ambiguous for exactly the two hours a year it
+    #: matters most.
+    scheduled_at: Mapped[Any] = mapped_column(DateTime, nullable=True, index=True)
+    #: How many times to retry a call that does not connect. Defaults to the same
+    #: two that :class:`~app.models.interview.InterviewSchedule` uses, and is said
+    #: out loud in the thread whenever the admin did not choose it.
+    retries: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 
@@ -64,12 +66,23 @@ class BatchTarget(Base):
 
 
 class BatchMessage(Base):
-    """One turn in the thread, persisted so a reload restores the conversation."""
+    """One turn in the thread, persisted so a reload restores the conversation.
+
+    Scoped to the *company*, not to a round. There is one thread per company and
+    many rounds inside it, so a message asking "how many haven't we reached yet?"
+    spans every round and belongs to none of them.
+    """
 
     __tablename__ = "batch_messages"
 
     message_id: Mapped[str] = mapped_column(String(100), primary_key=True)
-    batch_id: Mapped[str] = mapped_column(ForeignKey("interview_batches.batch_id"), nullable=False, index=True)
+    company_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True, default="")
+    #: The round this turn concerns, when it concerns one. Null for anything said
+    #: before the first question set exists, and for questions about the thread
+    #: as a whole.
+    batch_id: Mapped[Any] = mapped_column(
+        ForeignKey("interview_batches.batch_id"), nullable=True, index=True
+    )
     role: Mapped[str] = mapped_column(String(20), nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     #: Structured card data for the message, rendered instead of plain text.

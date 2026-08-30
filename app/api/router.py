@@ -2,11 +2,11 @@
 
 from fastapi import APIRouter
 
-from app.api.routes import batches, beneficiaries, calls, campaigns, completions, dashboard, employers, interviews, legacy_verification, verification
+from app.api.routes import beneficiaries, calls, campaigns, companies, completions, dashboard, employers, interviews, legacy_verification, verification
 
 api_router = APIRouter(prefix="/api")
 
-api_router.include_router(batches.router)
+api_router.include_router(companies.router)
 api_router.include_router(employers.router)
 api_router.include_router(beneficiaries.router)
 api_router.include_router(campaigns.router)

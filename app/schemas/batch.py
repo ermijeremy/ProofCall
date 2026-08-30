@@ -1,14 +1,13 @@
-"""Request bodies for the interview-batch thread."""
+"""Request bodies for the company thread."""
 
 from pydantic import BaseModel, Field
 
 
-class BatchCreate(BaseModel):
-    title: str | None = Field(default=None, max_length=255)
-    language: str = Field(default="am", max_length=20)
+class CompanyCreate(BaseModel):
+    name: str | None = Field(default=None, max_length=255)
 
 
-class BatchMessageCreate(BaseModel):
+class ThreadMessageCreate(BaseModel):
     text: str = Field(min_length=1)
 
 
