@@ -9,6 +9,7 @@ from app.core.config import settings
 from app.db.session import SessionLocal
 from app.services.interview_service import run_due_interviews
 from app.services.call_service import sync_active_calls
+from app.services.teleexpert_service import drain_failed_events
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,12 @@ class InterviewScheduler:
                         logger.info("Automatically processed %s due interview(s)", len(processed))
                     if synchronized:
                         logger.info("Automatically synchronized %s active call(s)", len(synchronized))
+                # TeleExpert never redelivers a webhook it has already seen a 2xx
+                # for, so an event that failed after that answer is only ever
+                # retried here. Its own session, because the drain opens one.
+                recovered = drain_failed_events()
+                if recovered:
+                    logger.info("Recovered %s failed webhook event(s)", len(recovered))
             except Exception:
                 # A failed provider or missing intelligence engine must not kill
                 # the web server; the next poll can retry the schedule safely.

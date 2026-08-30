@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Interview batches · CallProof{% endblock %}
+{% block page_title %}Interview batches{% endblock %}
+{% block content %}
+<div class="listing-head">
+  <div>
+    <div class="breadcrumb">{{ company_name|upper }}</div>
+    <p class="lede">Ask your workforce something, by telephone</p>
+    <p class="muted">Each batch is one thread: upload the people, type the questions, choose who gets
+      called, and read the counts. Nobody is called until you confirm in the thread.</p>
+  </div>
+  <button class="new-batch" id="new-batch" type="button"><span>+</span>New batch</button>
+</div>
+
+{% if batches %}
+<div class="batch-list">
+  {% for batch in batches %}
+  <a class="batch-card" href="/api/dashboard/batches/{{ batch.batch_id }}">
+    <div class="grow">
+      <strong>{{ batch.title or "Untitled batch" }}</strong>
+      <small>{{ batch.batch_id }} · {{ batch.created_at[:16]|replace("T", " ") }}</small>
+    </div>
+    <small>{{ batch.questions }} question{{ "" if batch.questions == 1 else "s" }}</small>
+    <small>{{ batch.roster }} on the list</small>
+    <small>{{ batch.returned }} / {{ batch.selected }} back</small>
+    <span class="phase phase-{{ batch.status }}">{{ batch.status }}</span>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">No batches yet. Press <strong>+ New batch</strong> to start one.</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // The + button creates the batch server-side and hands the admin straight to
+  // its thread, so the listing never shows a half-made row.
+  const button = document.getElementById("new-batch");
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      const response = await fetch("/api/batches", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({language: "am"}),
+      });
+      if (!response.ok) throw new Error(await response.text());
+      const batch = await response.json();
+      window.location.href = `/api/dashboard/batches/${batch.batch_id}`;
+    } catch (error) {
+      button.disabled = false;
+      alert(`Could not start a batch: ${error.message}`);
+    }
+  });
+</script>
+{% endblock %}

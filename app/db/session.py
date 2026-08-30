@@ -58,6 +58,15 @@ def _upgrade_legacy_sqlite_schema() -> None:
         "interview_schedules": {
             "answer_timeout_seconds": "INTEGER NOT NULL DEFAULT 45",
         },
+        "beneficiaries": {
+            "name": "VARCHAR(255) NOT NULL DEFAULT ''",
+        },
+        "teleexpert_webhook_events": {
+            "attempts": "INTEGER NOT NULL DEFAULT 0",
+        },
+        "interview_batches": {
+            "roster_worker_ids": "JSON NOT NULL DEFAULT '[]'",
+        },
     }
     with engine.begin() as connection:
         for table_name, columns in table_upgrades.items():

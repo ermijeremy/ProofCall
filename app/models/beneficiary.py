@@ -13,6 +13,7 @@ class Beneficiary(Base):
     __tablename__ = "beneficiaries"
 
     worker_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     company_id: Mapped[str] = mapped_column(ForeignKey("employers.company_id"), nullable=False, index=True)
     phone_number: Mapped[str] = mapped_column(String(40), nullable=False)
     preferred_language: Mapped[str] = mapped_column(String(20), default="am", nullable=False)

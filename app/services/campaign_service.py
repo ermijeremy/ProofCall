@@ -1,6 +1,5 @@
 """Campaign creation and beneficiary sampling orchestration."""
 
-from secrets import SystemRandom
 from uuid import uuid4
 
 from sqlalchemy.orm import Session
@@ -10,18 +9,18 @@ from app.repositories.beneficiaries import BeneficiaryRepository
 from app.repositories.campaigns import CampaignRepository
 from app.repositories.employers import EmployerRepository
 from app.schemas.campaign import CampaignCreate
-
-random_source = SystemRandom()
+from app.services.sampling_service import random_source, sample_from  # noqa: F401  (re-exported)
 
 
 def sample_workers(db: Session, company_id: str, sample_size: int) -> list[str]:
+    """Draw a sample of one company's active beneficiaries.
+
+    A thin wrapper over :func:`app.services.sampling_service.sample_from`, which
+    batches call with a candidate list the admin described instead of a company.
+    """
+
     beneficiaries = [item for item in BeneficiaryRepository(db).for_company(company_id) if item.is_active]
-    requested = len(beneficiaries) if sample_size == 0 else sample_size
-    if requested > len(beneficiaries):
-        raise ValueError(
-            f"Requested sample of {requested}, but only {len(beneficiaries)} active beneficiaries exist"
-        )
-    return [item.worker_id for item in random_source.sample(beneficiaries, requested)]
+    return [item.worker_id for item in sample_from(beneficiaries, sample_size)]
 
 
 def create_campaign(db: Session, data: CampaignCreate) -> Campaign:

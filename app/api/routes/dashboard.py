@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.services.aggregation_service import aggregate_company, aggregate_programme, live_calls, worker_evidence_detail
+from app.services.batch_service import DEFAULT_COMPANY_NAME, batch_detail, batch_listing
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 templates = Jinja2Templates(directory="app/dashboard/templates")
@@ -26,6 +27,34 @@ def calls(db: Session = Depends(get_db)) -> list[dict]:
 
 @router.get("", include_in_schema=False)
 def dashboard_home(request: Request, db: Session = Depends(get_db)):
+    """The landing page: the company's interview batches, and a + to add one."""
+
+    return templates.TemplateResponse(
+        request=request,
+        name="batches.html",
+        context={"batches": batch_listing(db), "company_name": DEFAULT_COMPANY_NAME},
+    )
+
+
+@router.get("/batches/{batch_id}", include_in_schema=False)
+def batch_page(request: Request, batch_id: str, db: Session = Depends(get_db)):
+    """One thread. Rendered server-side once, then kept current by the page itself."""
+
+    try:
+        batch = batch_detail(db, batch_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return templates.TemplateResponse(
+        request=request,
+        name="batch.html",
+        context={"batch": batch},
+    )
+
+
+@router.get("/programme", include_in_schema=False)
+def programme_page(request: Request, db: Session = Depends(get_db)):
+    """The clause-path report. Kept reachable because that path still runs."""
+
     return templates.TemplateResponse(
         request=request,
         name="overview.html",

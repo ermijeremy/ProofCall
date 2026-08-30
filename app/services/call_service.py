@@ -13,9 +13,14 @@ from app.repositories.beneficiaries import BeneficiaryRepository
 from app.repositories.calls import CallRepository
 from app.repositories.evidence import EvidenceRepository
 from app.schemas.call import CallCreate
-from app.services.teleexpert_service import result_values, transcript_from_turns
+from app.services.teleexpert_service import (
+    ACTIVE_CALL_STATUSES,
+    dispatch_completed_call,
+    dispatch_failed_call,
+    result_values,
+    transcript_from_turns,
+)
 
-ACTIVE_CALL_STATUSES = frozenset({"queued", "dispatching", "dialing", "retry_wait", "in_progress"})
 logger = logging.getLogger(__name__)
 
 
@@ -84,20 +89,40 @@ def sync_call_status(db: Session, call_id: str, client: TeleExpertClient | None 
     updated = repository.update(call, values)
     # Webhook delivery is the preferred completion path. During local
     # development the webhook may be disabled, so a browser Sync must continue
-    # the same transcript -> evidence -> aggregation pipeline. Existing
-    # evidence makes repeated Sync clicks idempotent and avoids another LLM call.
-    if updated.status == "completed" and updated.transcript and EvidenceRepository(db).get(updated.worker_id) is None:
-        from app.services.completion_service import process_completed_call
-
-        process_completed_call(
+    # the same pipeline. An already-stored result makes repeated Sync clicks
+    # idempotent and avoids another LLM call.
+    if updated.status == "completed" and updated.transcript and result_missing(db, updated):
+        dispatch_completed_call(
             db,
             updated.call_id,
-            updated.transcript,
-            updated.audio_url,
-            updated.transcript_turns or [],
-            updated.language,
+            {
+                "transcript": updated.transcript,
+                "audio_url": updated.audio_url,
+                "transcript_turns": updated.transcript_turns or [],
+                "language": updated.language,
+            },
         )
+    elif updated.status not in ACTIVE_CALL_STATUSES and updated.status != "completed":
+        dispatch_failed_call(db, updated.call_id, updated.failure_reason)
     return updated
+
+
+def result_missing(db: Session, call: TeleExpertCall) -> bool:
+    """True when a completed call has not yet produced its result.
+
+    The clause path writes evidence keyed on the worker; the batch path writes
+    answers keyed on the batch and the worker. Asking the wrong table would make a
+    batch call look permanently unprocessed and re-poll it forever, so each path
+    is asked about its own store.
+
+    ``batch_service`` is imported here because it imports this module.
+    """
+
+    from app.services import batch_service
+
+    if batch_service.is_batch_call(db, call.call_id):
+        return batch_service.batch_result_pending(db, call.call_id)
+    return EvidenceRepository(db).get(call.worker_id) is None
 
 
 def cancel_call(db: Session, call_id: str, client: TeleExpertClient | None = None) -> TeleExpertCall:
@@ -114,12 +139,11 @@ def sync_active_calls(db: Session) -> list[TeleExpertCall]:
     """Poll non-terminal provider calls and process completion automatically."""
 
     repository = CallRepository(db)
-    evidence = EvidenceRepository(db)
     updated: list[TeleExpertCall] = []
     for call in repository.list():
         needs_status_poll = call.status in ACTIVE_CALL_STATUSES
-        needs_evidence_retry = call.status == "completed" and evidence.get(call.worker_id) is None
-        if needs_status_poll or needs_evidence_retry:
+        needs_result_retry = call.status == "completed" and result_missing(db, call)
+        if needs_status_poll or needs_result_retry:
             try:
                 updated.append(sync_call_status(db, call.call_id))
             except TeleExpertError as exc:
@@ -127,15 +151,11 @@ def sync_active_calls(db: Session) -> list[TeleExpertCall]:
                 # backend restarts, old local IDs permanently return 404 and
                 # must not be polled forever.
                 if "(404)" in str(exc):
+                    reason = "TeleExpert no longer has this call (provider state was reset)."
                     updated.append(
-                        repository.update(
-                            call,
-                            {
-                                "status": "failed",
-                                "failure_reason": "TeleExpert no longer has this call (provider state was reset).",
-                            },
-                        )
+                        repository.update(call, {"status": "failed", "failure_reason": reason})
                     )
+                    dispatch_failed_call(db, call.call_id, reason)
                     logger.warning("Marked stale TeleExpert call %s as failed", call.call_id)
                 else:
                     logger.exception("Automatic synchronization failed for call %s", call.call_id)

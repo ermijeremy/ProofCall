@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class BeneficiaryCreate(BaseModel):
     worker_id: str = Field(min_length=1, max_length=100)
+    name: str = Field(default="", max_length=255)
     company_id: str = Field(min_length=1, max_length=100)
     phone_number: str = Field(min_length=3, max_length=40)
     preferred_language: str = Field(default="am", max_length=20)

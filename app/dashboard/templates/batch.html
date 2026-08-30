@@ -1,0 +1,230 @@
+{% extends "base.html" %}
+{% block title %}{{ batch.title or "Batch" }} · CallProof{% endblock %}
+{% block page_title %}{{ batch.title or "Interview batch" }}{% endblock %}
+{% block content %}
+<div class="listing-head">
+  <div>
+    <div class="breadcrumb"><a href="/api/dashboard">INTERVIEW BATCHES</a> / {{ batch.batch_id|upper }}</div>
+    <p class="muted" id="phase-note"></p>
+  </div>
+  <span class="phase phase-{{ batch.status }}" id="phase-chip">{{ batch.status }}</span>
+</div>
+
+<div class="thread-shell">
+  <div class="thread" id="thread"></div>
+
+  <div class="side-stack">
+    <div class="side-card">
+      <h3>Progress</h3>
+      <div id="progress"></div>
+    </div>
+    <div class="side-card">
+      <h3>The list</h3>
+      <div id="roster"></div>
+    </div>
+    <div class="side-card">
+      <h3>Questions</h3>
+      <div id="questions"></div>
+    </div>
+  </div>
+</div>
+
+<div class="composer">
+  <form id="composer">
+    <input type="file" id="file" accept=".csv" hidden>
+    <button class="icon-button" id="attach" type="button" title="Attach a CSV of names and contacts">📎</button>
+    <textarea id="text" rows="1" placeholder="Type the questions, or who to call…"></textarea>
+    <button class="send-button" id="send" type="submit" title="Send">↑</button>
+  </form>
+  <p class="composer-hint" id="hint"></p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const BATCH_ID = "{{ batch.batch_id }}";
+  // Rendered once server-side so the thread is on screen before any fetch runs.
+  const INITIAL = {{ batch|tojson }};
+  const thread = document.getElementById("thread");
+  const form = document.getElementById("composer");
+  const textarea = document.getElementById("text");
+  const fileInput = document.getElementById("file");
+  const sendButton = document.getElementById("send");
+  const attachButton = document.getElementById("attach");
+
+  // What the one input box means depends on the phase, so the hint says it out
+  // loud rather than making the admin guess.
+  const HINTS = {
+    draft: "Attach a CSV with a name and a contact column, and type your questions.",
+    ready: "Say who to call — everyone, half of them at random, or a few by name.",
+    selected: "Reply yes to place the calls, or no to choose different people.",
+    calling: "Interviews are running. Ask for progress at any time.",
+    complete: "Ask anything about the results. Every figure is counted, not guessed.",
+  };
+
+  let polling = null;
+
+  const escape = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => (
+    {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[character]
+  ));
+
+  const clock = (stamp) => new Date(stamp).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
+
+  function summaryCard(summary) {
+    const questions = Object.values(summary.questions || {});
+    const blocks = questions.map((question) => {
+      const counts = Object.entries(question.category_counts || {});
+      const rows = counts.length
+        ? counts.map(([name, total]) => `<div class="count-row"><span>${escape(name)}</span><b>${total}</b></div>`).join("")
+        : `<div class="count-row"><span>No categorised answers</span><b>0</b></div>`;
+      return `<p class="question-text">${escape(question.question)}</p>${rows}`;
+    }).join("");
+    const excluded = (summary.excluded || [])
+      .map((record) => `<p class="excluded-note">${escape(record.name)} — ${escape(record.reason)}</p>`)
+      .join("");
+    return `<div class="card"><h4>${summary.interviews_counted} counted · ${summary.excluded_total} excluded</h4>${blocks}${excluded}</div>`;
+  }
+
+  function card(payload) {
+    if (!payload) return "";
+    if (payload.kind === "summary" && payload.summary) return summaryCard(payload.summary);
+    if (payload.kind === "questions" && payload.questions) {
+      // Both forms are shown when they differ: the respondent hears question.text,
+      // so an admin has to be able to see what their shorthand became.
+      const items = payload.questions.map((question) => {
+        const typed = question.original && question.original !== question.text
+          ? `<div class="as-typed">you typed: ${escape(question.original)}</div>`
+          : "";
+        return `<li>${escape(question.text)}${typed}</li>`;
+      }).join("");
+      return `<div class="card"><h4>Questions to ask</h4><ol>${items}</ol></div>`;
+    }
+    if (payload.kind === "roster" && payload.workers) {
+      const items = payload.workers.map((worker) => `<li>${escape(worker.name)} — ${escape(worker.contact)}</li>`).join("");
+      return `<div class="card"><h4>${payload.workers.length} on the list</h4><ul>${items}</ul></div>`;
+    }
+    if (payload.kind === "selection" && payload.selected) {
+      const items = payload.selected.map((person) => `<li>${escape(person.name || person.worker_id)}</li>`).join("");
+      return `<div class="card"><h4>${payload.selected.length} to call</h4><ul>${items}</ul></div>`;
+    }
+    return "";
+  }
+
+  function renderThread(messages) {
+    thread.innerHTML = messages.map((message) => `
+      <div class="turn turn-${escape(message.role)}">
+        <div class="bubble">${escape(message.text)}${card(message.payload)}<time>${clock(message.created_at)}</time></div>
+      </div>`).join("");
+  }
+
+  function renderSide(batch) {
+    const progress = batch.progress || {};
+    document.getElementById("progress").innerHTML = `
+      <div class="progress-line"><span>Selected</span><b>${progress.selected || 0}</b></div>
+      <div class="progress-line"><span>Answers back</span><b>${progress.returned || 0}</b></div>
+      <div class="progress-line"><span>Still waiting</span><b>${progress.waiting || 0}</b></div>
+      <div class="progress-line"><span>Language</span><b>${escape(batch.language)}</b></div>`;
+
+    const roster = batch.roster || [];
+    document.getElementById("roster").innerHTML = roster.length
+      ? roster.map((person) => {
+          const state = person.excluded ? "excluded" : (person.call_status || (person.selected ? "selected" : "waiting"));
+          return `<div class="roster-row"><span class="dot dot-${escape(state)}"></span>
+            <span class="grow">${escape(person.name)}<small>${escape(person.contact)}</small></span>
+            <small>${escape(state)}</small></div>`;
+        }).join("")
+      : `<p class="muted">No CSV uploaded yet.</p>`;
+
+    const questions = batch.questions || [];
+    document.getElementById("questions").innerHTML = questions.length
+      ? `<ol style="margin:0;padding-left:18px;font-size:13px">${questions.map((question) => `<li>${escape(question.text)}</li>`).join("")}</ol>`
+      : `<p class="muted">No questions typed yet.</p>`;
+  }
+
+  function render(batch) {
+    renderThread(batch.messages || []);
+    renderSide(batch);
+    const chip = document.getElementById("phase-chip");
+    chip.textContent = batch.status;
+    chip.className = `phase phase-${batch.status}`;
+    document.getElementById("hint").textContent = HINTS[batch.status] || "";
+    document.getElementById("phase-note").textContent =
+      `${(batch.roster || []).length} on the list · ${(batch.questions || []).length} question(s) · started ${batch.created_at.slice(0, 16).replace("T", " ")}`;
+    window.scrollTo({top: document.body.scrollHeight});
+    // Poll only while calls are in flight; every other phase changes only when
+    // the admin sends something.
+    if (batch.status === "calling" && polling === null) {
+      polling = window.setInterval(refresh, 4000);
+    } else if (batch.status !== "calling" && polling !== null) {
+      window.clearInterval(polling);
+      polling = null;
+    }
+  }
+
+  async function refresh() {
+    const response = await fetch(`/api/batches/${BATCH_ID}`);
+    if (response.ok) render(await response.json());
+  }
+
+  function busy(state) {
+    sendButton.disabled = state;
+    attachButton.disabled = state;
+  }
+
+  async function post(path, options) {
+    busy(true);
+    try {
+      const response = await fetch(path, options);
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.detail || "request failed");
+      render(body.batch);
+    } catch (error) {
+      alert(error.message);
+    } finally {
+      busy(false);
+      textarea.focus();
+    }
+  }
+
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const text = textarea.value.trim();
+    if (!text) return;
+    textarea.value = "";
+    textarea.style.height = "auto";
+    post(`/api/batches/${BATCH_ID}/messages`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({text}),
+    });
+  });
+
+  attachButton.addEventListener("click", () => fileInput.click());
+
+  fileInput.addEventListener("change", () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+    const data = new FormData();
+    data.append("file", file);
+    fileInput.value = "";
+    post(`/api/batches/${BATCH_ID}/upload`, {method: "POST", body: data});
+  });
+
+  textarea.addEventListener("input", () => {
+    textarea.style.height = "auto";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 168)}px`;
+  });
+
+  textarea.addEventListener("keydown", (event) => {
+    // Enter sends; shift+enter is a newline. Questions arrive as several lines,
+    // so both have to work.
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      form.requestSubmit();
+    }
+  });
+
+  render(INITIAL);
+  textarea.focus();
+</script>
+{% endblock %}

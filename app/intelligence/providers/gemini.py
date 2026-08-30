@@ -12,11 +12,14 @@ one key's per-minute limit. See :class:`GeminiProvider` for the rotation rules.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
 from typing import Any, Sequence
 
 from app.intelligence.providers.base import ProviderError
+
+logger = logging.getLogger(__name__)
 
 #: Overridable so a newer model can be selected without a code change.
 #:
@@ -49,6 +52,31 @@ ROTATABLE_ERRORS = (
 
 #: Substrings marking a key that will never work. These are parked after one
 #: failure instead of being retried on every later call.
+#: Transport failures, which say nothing at all about the key. These are retried
+#: on a fresh key — a new key means a new client and a new connection — but only
+#: ``MAX_TRANSPORT_RETRIES`` times, because a network that is down stays down and
+#: walking twelve keys through it would hang the request instead of failing it.
+#:
+#: Before this existed a single reset socket ended the whole call: the error
+#: matched neither list, ``complete_json`` re-raised on the first key, and one
+#: flaky connection read to the admin as "I could not tell who you meant".
+TRANSPORT_ERRORS = (
+    "Connection reset by peer",
+    "ReadError",
+    "ReadTimeout",
+    "ConnectError",
+    "ConnectTimeout",
+    "RemoteProtocolError",
+    "Errno 104",
+    "Errno 32",
+    "timed out",
+    "Temporary failure in name resolution",
+)
+
+#: How many transport failures to ride out before giving up on the request.
+MAX_TRANSPORT_RETRIES = 3
+
+
 DEAD_KEY_ERRORS = (
     "401",
     "403",
@@ -265,6 +293,7 @@ class GeminiProvider:
             )
 
         failures: list[str] = []
+        transport_failures = 0
         for key in order:
             try:
                 return self._call_once(key, system=system, user=user)
@@ -274,6 +303,19 @@ class GeminiProvider:
                 if any(marker in message for marker in DEAD_KEY_ERRORS):
                     with self._lock:
                         self._dead.add(key)
+                    continue
+                if any(marker in message for marker in TRANSPORT_ERRORS):
+                    transport_failures += 1
+                    if transport_failures >= MAX_TRANSPORT_RETRIES:
+                        raise ProviderError(
+                            f"Gemini unreachable after {transport_failures} transport failure(s): {message}"
+                        ) from exc
+                    logger.warning(
+                        "Gemini transport failure %s/%s on %s, retrying on another key",
+                        transport_failures,
+                        MAX_TRANSPORT_RETRIES,
+                        mask_key(key),
+                    )
                     continue
                 if any(marker in message for marker in ROTATABLE_ERRORS):
                     continue
