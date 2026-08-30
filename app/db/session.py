@@ -1,6 +1,8 @@
 """SQLAlchemy engine and request-scoped session management."""
 
 from collections.abc import Generator
+from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import Session, sessionmaker
@@ -8,6 +10,25 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.config import settings
 from app.db.base import Base
 
+def _prepare_sqlite_path(database_url: str) -> None:
+    """Create the parent directory before SQLite opens a file database."""
+
+    if not database_url.startswith("sqlite"):
+        return
+
+    parsed = urlparse(database_url)
+    if parsed.path in {"", "/", "/:memory:"} or parsed.path.endswith(":memory:"):
+        return
+
+    database_path = Path(unquote(parsed.path))
+    if parsed.netloc and parsed.netloc != "localhost":
+        database_path = Path(f"//{parsed.netloc}{parsed.path}")
+    elif database_url.startswith("sqlite:///./"):
+        database_path = Path.cwd() / unquote(parsed.path.removeprefix("/./"))
+    database_path.parent.mkdir(parents=True, exist_ok=True)
+
+
+_prepare_sqlite_path(settings.database_url)
 connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
 engine = create_engine(settings.database_url, connect_args=connect_args)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
