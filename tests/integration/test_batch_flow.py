@@ -46,6 +46,19 @@ def texts(db: Session, batch_id: str) -> list[str]:
     return [message.text for message in BatchMessageRepository(db).for_batch(batch_id)]
 
 
+def slug_for(batch, typed: str) -> str:
+    """The slug of the question the admin typed as ``typed``.
+
+    Slugs come from the topic the model names for each question, so spelling one
+    out in a test asserts the fake provider's wording rather than the behaviour
+    under test. Look it up through ``original``, which is always the typed text.
+    """
+
+    return next(
+        question["slug"] for question in batch.questions if question.get("original") == typed
+    )
+
+
 def ready_batch(db: Session, intelligence: BatchIntelligence, csv: bytes = ROSTER_CSV):
     batch = batch_service.create_batch(db, title="August round")
     batch_service.handle_upload(db, batch.batch_id, csv, "employees.csv")
@@ -112,10 +125,15 @@ def test_re_uploading_the_same_csv_does_not_double_the_roster(db: Session):
 def test_typed_questions_become_a_question_set_with_age_first(db: Session, intelligence: BatchIntelligence):
     batch = ready_batch(db, intelligence)
     assert batch.status == batch_service.READY
-    assert [question["slug"] for question in batch.questions] == [
-        "age_years",
-        "do_u_get_enough_compensation",
+    assert [question["original"] for question in batch.questions] == [
+        "How old are you?",
+        "Do u get enough compensation?",
     ]
+    # Age is always the first slot whether or not it was typed, and every slug is
+    # distinct because the extraction schema keys on it.
+    assert batch.questions[0]["slug"] == "age_years"
+    slugs = [question["slug"] for question in batch.questions]
+    assert len(set(slugs)) == len(slugs)
 
 
 def test_questions_before_a_roster_leave_the_batch_waiting_for_the_csv(db: Session, intelligence: BatchIntelligence):
@@ -255,7 +273,9 @@ def test_the_interview_prompt_sent_to_each_call_carries_the_typed_questions(
     batch_service.handle_message(db, batch.batch_id, "yes", intelligence)
 
     call = CallRepository(db).list()[0]
-    assert "Do u get enough compensation?" in call.prompt
+    # The refined wording, not the shorthand: the respondent hears what the model
+    # rewrote, and asserting the typed text would pass only while nothing rewrote it.
+    assert batch.questions[1]["text"] in call.prompt
     assert "FIRST QUESTION, ALWAYS" in call.prompt
     # The generated worker id contains digits and is echoed as the interview
     # reference; every other number is banned, because a number in an interview
@@ -292,7 +312,7 @@ def test_answers_come_back_and_pass_two_categorizes_the_whole_batch(
     assert batch.status == batch_service.COMPLETE
     records = WorkerAnswersRepository(db).for_batch(batch.batch_id)
     assert len(records) == 4
-    assert set(batch.categories) == {"age_years", "do_u_get_enough_compensation"}
+    assert set(batch.categories) == {question["slug"] for question in batch.questions}
     # One categorization call for the batch, not one per person.
     assert len(provider.calls_for("You group answers")) == 1
 
@@ -334,7 +354,8 @@ def test_a_refusal_is_counted_as_a_refusal_rather_than_guessed(
     batch_service.handle_message(db, batch.batch_id, "yes", intelligence)
     complete_all_calls(db, batch, intelligence)
 
-    counts = batch_service.batch_summary(db, batch)["questions"]["do_u_get_enough_compensation"]
+    compensation = slug_for(batch, "Do u get enough compensation?")
+    counts = batch_service.batch_summary(db, batch)["questions"][compensation]
     assert counts["state_counts"]["REFUSED"] == 1
     assert counts["category_counts"]["Declined to answer"] == 1
 

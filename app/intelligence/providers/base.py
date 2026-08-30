@@ -10,7 +10,7 @@ Gemini is the project default (:mod:`app.intelligence.providers.gemini`).
 
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol, Sequence, runtime_checkable
 
 
 class ProviderError(RuntimeError):
@@ -34,5 +34,37 @@ class LLMProvider(Protocol):
 
         Implementations must raise :class:`ProviderError` rather than returning
         a partial or guessed result.
+        """
+        ...
+
+
+@runtime_checkable
+class ToolCallingProvider(LLMProvider, Protocol):
+    """A provider that can also be asked to *choose* an action.
+
+    Separate from :class:`LLMProvider` because the two are different capabilities,
+    not one with an optional extra. Extraction wants one shape of answer and JSON
+    mode gives it; a router wants a decision and must never be handed prose where
+    an action was required. ``RecordedProvider`` replays fixtures and satisfies
+    only :class:`LLMProvider`, which is the honest description of it.
+    """
+
+    def complete_tool_call(
+        self,
+        *,
+        system: str,
+        messages: Sequence[dict[str, Any]],
+        tools: Sequence[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Return ``{"name": str, "arguments": dict}`` for the tool the model chose.
+
+        Implementations force a call and raise :class:`ProviderError` if none comes
+        back, because a router that silently does nothing is worse than one that
+        fails loudly.
+
+        ``messages`` carries the turn history as
+        ``[{"role": "user" | "model", "text": str}]``. A tool result is fed back as
+        ``{"role": "tool", "name": str, "response": dict}``, preceded by the model
+        turn that called it as ``{"role": "model", "call": {"name", "arguments"}}``.
         """
         ...

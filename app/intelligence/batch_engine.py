@@ -5,11 +5,19 @@ around it hold the prompts and the logic, and this class owns nothing except the
 boundary with the model. Keeping the boundary in one place is what lets the batch
 services be tested with a fake provider and no network.
 
-Five model calls exist in the whole batch path, and they are all here:
-question refinement (once per typed question set), extraction (once per completed
-interview), categorization (once per batch), selection parsing (once per
-instruction), and analysis (once per admin question). Nothing else in the batch
-path talks to a model.
+Four model calls exist in the whole batch path, and they are all here:
+routing (once per administrator message, and up to three times when one message
+asks for two things), question refinement (once per typed question set),
+extraction (once per completed interview), and categorization (once per round).
+Nothing else in the batch path talks to a model. Questions about the results are
+routing too: the counts are in the context block, so the router answers them with
+its ``answer`` tool rather than a second call of its own.
+
+Routing is the only one that needs :class:`ToolCallingProvider` rather than
+:class:`LLMProvider`. That is checked when it is used rather than at
+construction, because a provider that can only extract is still perfectly useful
+for everything else, and refusing to build the seam over it would take the whole
+results conversation down with the router.
 """
 
 from __future__ import annotations
@@ -17,14 +25,14 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from app.intelligence import analysis, categorize, questions, safeguarding, selection
-from app.intelligence.providers.base import LLMProvider, ProviderError
+from app.intelligence import agent, categorize, questions, safeguarding
+from app.intelligence.providers.base import LLMProvider, ProviderError, ToolCallingProvider
 
 logger = logging.getLogger(__name__)
 
 
 class BatchIntelligence:
-    """Interview prompts, answer extraction, categories, selection, and chat."""
+    """Interview prompts, answer extraction, categories, and routing."""
 
     def __init__(self, provider: LLMProvider) -> None:
         self.provider = provider
@@ -93,20 +101,27 @@ class BatchIntelligence:
     ) -> dict[str, dict[str, Any]]:
         return categorize.categorize_batch(self.provider, question_set, records)
 
-    # -- selection ---------------------------------------------------------- #
+    # -- routing ------------------------------------------------------------ #
 
-    def parse_selection(self, instruction: str) -> dict[str, Any]:
-        return selection.parse_selection(self.provider, instruction)
-
-    # -- chat --------------------------------------------------------------- #
-
-    def answer(
+    def decide(
         self,
-        admin_question: str,
-        summary: dict[str, Any],
-        history: list[dict[str, str]] | None = None,
-    ) -> str:
-        return analysis.answer(self.provider, admin_question, summary, history)
+        context: dict[str, Any],
+        history: list[dict[str, str]],
+        prior: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Choose the one action the latest administrator message asked for.
+
+        Raises :class:`ProviderError` rather than falling back to a canned reply.
+        A transport failure that reads as "I could not tell who you meant" is the
+        exact bug this rewrite exists to remove: the administrator would retype a
+        perfectly clear instruction and get the same answer again.
+        """
+
+        if not isinstance(self.provider, ToolCallingProvider):
+            raise ProviderError(
+                f"The {self.name} provider cannot choose an action; it only extracts."
+            )
+        return agent.decide(self.provider, context, history, prior=prior or [])
 
 
 def build_batch_intelligence(provider: LLMProvider | None = None) -> BatchIntelligence:

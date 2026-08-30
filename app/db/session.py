@@ -49,6 +49,8 @@ def _upgrade_legacy_sqlite_schema() -> None:
         "job_positions": "JSON NOT NULL DEFAULT '{}'",
         "gender_breakdown": "JSON NOT NULL DEFAULT '{}'",
         "age_band_breakdown": "JSON NOT NULL DEFAULT '{}'",
+        "timezone": "VARCHAR(64) NOT NULL DEFAULT ''",
+        "clock_convention": "VARCHAR(20) NOT NULL DEFAULT ''",
     }
     table_upgrades = {
         "employers": employer_columns,
@@ -65,7 +67,16 @@ def _upgrade_legacy_sqlite_schema() -> None:
             "attempts": "INTEGER NOT NULL DEFAULT 0",
         },
         "interview_batches": {
-            "roster_worker_ids": "JSON NOT NULL DEFAULT '[]'",
+            # roster_worker_ids was dropped when the thread became company-scoped:
+            # the roster is the company's, so per-round membership was scoping
+            # around a duplicate-import bug instead of fixing it. SQLite cannot
+            # drop a column in place and a stale one is harmless, so it is left
+            # alone on existing databases rather than migrated away.
+            "scheduled_at": "DATETIME",
+            "retries": "INTEGER NOT NULL DEFAULT 2",
+        },
+        "batch_messages": {
+            "company_id": "VARCHAR(100) NOT NULL DEFAULT ''",
         },
     }
     with engine.begin() as connection:

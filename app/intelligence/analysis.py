@@ -1,23 +1,20 @@
-"""The chat over a finished batch. Code counts; the model narrates.
+"""The counts behind a finished round. Code counts; the model narrates.
 
-Every number the admin reads is computed here, in Python, from stored answers,
-and handed to the model already calculated. The model is never asked to tally
-twenty records, because that is exactly where invented numbers come from — and a
-monitoring figure nobody can reproduce is worse than no figure at all.
+Every number the administrator reads is computed here, in Python, from stored
+answers, and handed to the router already calculated. The model is never asked to
+tally twenty records, because that is exactly where invented numbers come from —
+and a monitoring figure nobody can reproduce is worse than no figure at all.
 
-This is the same split that makes the clause path defensible (the model extracts,
-code decides), applied to a conversation instead of a verdict.
+There is deliberately no model call in this module. The router
+(:mod:`app.intelligence.agent`) is shown the summary in its context block and
+answers questions about it with the ``answer`` tool, so the counts reach the
+administrator through one model call rather than two, and there is only one place
+where the words "quote these and add nothing" are said.
 """
 
 from __future__ import annotations
 
-import json
-import logging
 from typing import Any
-
-from app.intelligence.providers.base import LLMProvider, ProviderError
-
-logger = logging.getLogger(__name__)
 
 #: Quotes handed over per question. Enough to ground an answer, few enough that
 #: the model is not tempted to start counting them.
@@ -86,67 +83,6 @@ def summarize(
     }
 
 
-def build_analysis_prompt() -> str:
-    """System instructions for answering one admin question about a batch."""
-
-    return """You answer an administrator's questions about a set of telephone interviews
-that have already been analysed. You are given the counts. You do not compute
-new ones.
-
-RULES
-Use only the figures in the data you were given. Never add, subtract, average,
-or convert numbers into percentages that are not already there. If the answer
-would need a number that is not present, say which number is missing instead of
-working it out.
-Never invent a person, an answer, or a quote. Quotes may only be repeated from
-the ones supplied, and in the language they were said in.
-Excluded interviews are excluded on purpose. Do not count them, and do not fold
-them back into a total. If asked about them, report the reason recorded.
-Do not judge the employer, score the results, or recommend an action unless the
-administrator asked for an interpretation, and say plainly when something is a
-reading of the data rather than a count of it.
-Answer in a few sentences of plain English. Quote figures exactly as given. No
-preamble.
-"""
-
-
-def build_analysis_request(
-    admin_question: str,
-    summary: dict[str, Any],
-    history: list[dict[str, str]] | None = None,
-) -> str:
-    """The user turn: the counts, the recent thread, and the question."""
-
-    parts = [f"Counts for this batch:\n\n{json.dumps(summary, ensure_ascii=False, indent=2)}"]
-    if history:
-        transcript = "\n".join(f"{turn['role']}: {turn['text']}" for turn in history[-6:])
-        parts.append(f"Earlier in this conversation:\n\n{transcript}")
-    parts.append(f"Administrator's question:\n\n{admin_question}")
-    return "\n\n".join(parts)
-
-
-def answer(
-    provider: LLMProvider,
-    admin_question: str,
-    summary: dict[str, Any],
-    history: list[dict[str, str]] | None = None,
-) -> str:
-    """Answer one question about the batch, or say why it could not be answered."""
-
-    try:
-        payload = provider.complete_json(
-            system=build_analysis_prompt() + '\nReturn JSON only: {"answer": "..."}',
-            user=build_analysis_request(admin_question, summary, history),
-        )
-    except ProviderError as exc:
-        logger.exception("Analysis call failed")
-        return f"The analysis model could not be reached, so I have not answered that. ({exc})"
-    text = payload.get("answer")
-    if isinstance(text, str) and text.strip():
-        return text.strip()
-    return "The analysis model returned nothing usable for that question."
-
-
 def headline(summary: dict[str, Any]) -> str:
     """A one-line, model-free summary. Safe to show before any chat happens."""
 
@@ -158,9 +94,6 @@ def headline(summary: dict[str, Any]) -> str:
 
 __all__ = [
     "MAX_QUOTES_PER_QUESTION",
-    "answer",
-    "build_analysis_prompt",
-    "build_analysis_request",
     "headline",
     "summarize",
 ]
