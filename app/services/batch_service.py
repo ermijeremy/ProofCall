@@ -145,6 +145,18 @@ def current_round(db: Session, company_id: str) -> InterviewBatch | None:
     return BatchRepository(db).newest_for_company(company_id)
 
 
+def create_batch(
+    db: Session, title: str | None = None, language: str = "am"
+) -> InterviewBatch:
+    """Create the legacy API's default company-scoped round."""
+
+    company = ensure_company(db)
+    batch = open_round(db, company, title)
+    if language:
+        BatchRepository(db).update(batch, {"language": language})
+    return batch
+
+
 def open_round(db: Session, company: Employer, title: str | None = None) -> InterviewBatch:
     """Start a round. Called when questions are set, never by a button."""
 
@@ -431,6 +443,76 @@ def company_thread(db: Session, company_id: str) -> dict[str, Any]:
             }
             for message in BatchMessageRepository(db).for_company(company_id)
         ],
+    }
+
+
+def batch_detail(db: Session, batch_id: str) -> dict[str, Any]:
+    """Return the batch-shaped view used by the API and reporting layer."""
+
+    batch = BatchRepository(db).get(batch_id)
+    if batch is None:
+        raise ValueError(f"Batch not found: {batch_id}")
+    thread = company_thread(db, batch.company_id)
+    targets = BatchTargetRepository(db).for_batch(batch_id)
+    return {
+        "batch_id": batch.batch_id,
+        "company_id": batch.company_id,
+        "title": batch.title,
+        "language": batch.language,
+        "status": batch.status,
+        "waiting_on": WAITING_ON.get(batch.status, ""),
+        "questions": batch.questions or [],
+        "categories": batch.categories or {},
+        "scheduled_at": batch.scheduled_at.isoformat() if batch.scheduled_at else None,
+        "retries": batch.retries,
+        "roster": thread["people"],
+        "targets": [
+            {"worker_id": target.worker_id, "call_id": target.call_id, "status": target.status}
+            for target in targets
+        ],
+        "summary": batch_summary(db, batch),
+        "messages": thread["messages"],
+    }
+
+
+def replay_fixture(db: Session, batch_id: str, worker_id: str, fixture: str) -> WorkerAnswers:
+    """Process a checked-in transcript fixture without placing a call."""
+
+    from pathlib import Path
+    import json
+
+    batch = BatchRepository(db).get(batch_id)
+    if batch is None:
+        raise ValueError(f"Batch not found: {batch_id}")
+    target = next(
+        (item for item in BatchTargetRepository(db).for_batch(batch_id) if item.worker_id == worker_id),
+        None,
+    )
+    if target is None:
+        raise ValueError(f"Worker is not selected in this batch: {worker_id}")
+    path = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "transcripts" / f"{fixture}.json"
+    if not path.exists():
+        raise ValueError(f"Fixture not found: {fixture}")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    transcript = payload.get("transcript") if isinstance(payload, dict) else None
+    if not isinstance(transcript, str) or not transcript.strip():
+        raise ValueError(f"Fixture has no transcript: {fixture}")
+    target_repository = BatchTargetRepository(db)
+    target_repository.update(target, {"call_id": target.call_id or f"fixture_{uuid4().hex}", "status": "dialing"})
+    return process_batch_call(db, target.call_id, transcript)
+
+
+def debug_snapshot(db: Session, batch_id: str) -> dict[str, Any]:
+    """Expose a safe operational snapshot for local demos and diagnostics."""
+
+    detail = batch_detail(db, batch_id)
+    return {
+        "batch_id": detail["batch_id"],
+        "status": detail["status"],
+        "roster_count": len(detail["roster"]),
+        "target_count": len(detail["targets"]),
+        "message_count": len(detail["messages"]),
+        "summary": detail["summary"],
     }
 
 
