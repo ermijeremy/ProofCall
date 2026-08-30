@@ -7,6 +7,7 @@ from uuid import uuid4
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.phone import to_e164
 from app.integrations.teleexpert_client import TeleExpertClient, TeleExpertError
 from app.models.call import TeleExpertCall
 from app.repositories.beneficiaries import BeneficiaryRepository
@@ -14,9 +15,9 @@ from app.repositories.calls import CallRepository
 from app.repositories.evidence import EvidenceRepository
 from app.schemas.call import CallCreate
 from app.services.teleexpert_service import (
-    ACTIVE_CALL_STATUSES,
     dispatch_completed_call,
     dispatch_failed_call,
+    is_active,
     result_values,
     transcript_from_turns,
 )
@@ -33,10 +34,18 @@ def submit_teleexpert_call(
     if BeneficiaryRepository(db).get(data.worker_id) is None:
         raise ValueError(f"Worker not found: {data.worker_id}")
 
+    # The last gate before the wire. TeleExpert rejects a number without a leading
+    # "+", so "251933325080" would be recorded as a person who did not answer
+    # rather than as a number that was never dialable. Normalized here rather than
+    # in each caller, because every call in the product goes through this function.
+    dialed_number = to_e164(data.phone_number)
+    if not dialed_number:
+        raise ValueError(f"No dialable number for {data.worker_id}: {data.phone_number!r}")
+
     remote = client or TeleExpertClient()
     try:
         response = remote.submit_call(
-            phone_number=data.phone_number,
+            phone_number=dialed_number,
             prompt=data.prompt,
             response_format=data.response_format,
             retries=data.retries,
@@ -56,7 +65,8 @@ def submit_teleexpert_call(
         call_id=str(response.get("call_id") or response.get("id")),
         worker_id=data.worker_id,
         campaign_id=data.campaign_id,
-        phone_number=data.phone_number,
+        # The form that was actually dialed, so the record and the telephone agree.
+        phone_number=dialed_number,
         prompt=data.prompt,
         response_format=data.response_format,
         retries=data.retries,
@@ -102,7 +112,7 @@ def sync_call_status(db: Session, call_id: str, client: TeleExpertClient | None 
                 "language": updated.language,
             },
         )
-    elif updated.status not in ACTIVE_CALL_STATUSES and updated.status != "completed":
+    elif not is_active(updated.status) and updated.status != "completed":
         dispatch_failed_call(db, updated.call_id, updated.failure_reason)
     return updated
 
@@ -141,7 +151,10 @@ def sync_active_calls(db: Session) -> list[TeleExpertCall]:
     repository = CallRepository(db)
     updated: list[TeleExpertCall] = []
     for call in repository.list():
-        needs_status_poll = call.status in ACTIVE_CALL_STATUSES
+        # Anything the provider has not called terminal is still worth polling,
+        # including a status this code does not recognise. A call left unpolled
+        # because of an unfamiliar status never reaches its transcript.
+        needs_status_poll = is_active(call.status) and not call.call_id.startswith("demo_call_")
         needs_result_retry = call.status == "completed" and result_missing(db, call)
         if needs_status_poll or needs_result_retry:
             try:

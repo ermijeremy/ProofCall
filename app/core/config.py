@@ -24,6 +24,12 @@ class Settings(BaseModel):
     teleexpert_answer_timeout_seconds: int = Field(
         default_factory=lambda: int(os.getenv("TELEXPERT_ANSWER_TIMEOUT_SECONDS", "45"))
     )
+    # Used to turn a number written the way a local spreadsheet writes it —
+    # "0933325080" or "933325080" — into the E.164 form the telephony API insists
+    # on. Ethiopia by default, because that is where the interviews are.
+    default_country_code: str = Field(
+        default_factory=lambda: os.getenv("CALLPROOF_DEFAULT_COUNTRY_CODE", "251").strip().lstrip("+")
+    )
     scheduler_enabled: bool = Field(
         default_factory=lambda: os.getenv("CALLPROOF_SCHEDULER_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
     )

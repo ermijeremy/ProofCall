@@ -16,17 +16,60 @@ from app.services.completion_service import process_completed_call
 
 logger = logging.getLogger(__name__)
 
-#: Statuses TeleExpert reports while a call is still in flight. Anything else is
-#: terminal, so a call that leaves this set without a transcript never gets one.
-ACTIVE_CALL_STATUSES = frozenset({"queued", "dispatching", "dialing", "retry_wait", "in_progress"})
+#: The three statuses ``api.md`` calls terminal, and the only ones that end a
+#: call. Everything else — documented in-flight states, and any state name the
+#: provider adds later — is treated as still in flight by :func:`is_active`.
+TERMINAL_CALL_STATUSES = frozenset({"completed", "failed", "cancelled"})
+
+#: Statuses TeleExpert reports while a call is still in flight. ``processing`` is
+#: not in ``api.md``'s table but is what the running service actually reports
+#: between accepting a call and connecting it, so it is listed here to keep the
+#: documented set honest about what has been observed.
+ACTIVE_CALL_STATUSES = frozenset(
+    {"queued", "dispatching", "dialing", "retry_wait", "in_progress", "processing"}
+)
+
+
+def is_active(status: str | None) -> bool:
+    """True while a call may still produce an interview.
+
+    Deliberately the complement of the terminal set rather than a membership test
+    against :data:`ACTIVE_CALL_STATUSES`. A status the provider reports that this
+    code has never heard of is a call still in progress, not a failed one: reading
+    an unknown state as a failure made every call to ``processing`` announce
+    itself in the thread as "did not go through" while the telephone was in fact
+    ringing, and then stopped polling it, so the real result never arrived.
+    """
+
+    return (status or "") not in TERMINAL_CALL_STATUSES
 
 #: How many times a failed event may be drained before it is left alone.
 MAX_EVENT_ATTEMPTS = 3
 
 
+#: What TeleExpert calls each side of the call, mapped to the words the extraction
+#: prompt uses. TeleExpert labels its own interviewer "assistant" and the person
+#: who was rung "caller"; the extraction prompt asks for the "respondent's" words
+#: and warns against quoting the "interviewer", so the labels are translated here
+#: rather than leaving the model to guess which side is which.
+SPEAKER_LABELS = {
+    "assistant": "interviewer",
+    "agent": "interviewer",
+    "system": "interviewer",
+    "caller": "respondent",
+    "user": "respondent",
+    "callee": "respondent",
+}
+
+
+def speaker_label(turn: dict[str, Any]) -> str:
+    raw = str(turn.get("role") or turn.get("speaker") or "unknown").strip().lower()
+    return SPEAKER_LABELS.get(raw, raw or "unknown")
+
+
 def transcript_from_turns(turns: list[dict[str, Any]]) -> str:
     return "\n".join(
-        f"{turn.get('role', turn.get('speaker', 'unknown'))}: {turn.get('text', '')}".strip()
+        f"{speaker_label(turn)}: {turn.get('text', '')}".strip()
         for turn in turns
         if isinstance(turn, dict) and turn.get("text")
     )
@@ -124,7 +167,7 @@ def process_webhook_event(event_id: str) -> None:
                 if not values["transcript"]:
                     raise ValueError("Completed TeleExpert call did not include a transcript")
                 dispatch_completed_call(db, updated.call_id, values)
-            elif updated.status not in ACTIVE_CALL_STATUSES:
+            elif not is_active(updated.status):
                 dispatch_failed_call(db, updated.call_id, values["failure_reason"])
             event.status = "processed"
             event.processed_at = datetime.utcnow()

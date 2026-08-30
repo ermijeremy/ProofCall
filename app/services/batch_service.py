@@ -24,7 +24,6 @@ Three rules shape the file, in order of how much damage breaking them does:
 from __future__ import annotations
 
 import logging
-import re
 from datetime import UTC, datetime
 from typing import Any, Callable
 from uuid import uuid4
@@ -32,6 +31,7 @@ from uuid import uuid4
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.phone import to_e164
 from app.integrations.teleexpert_client import TeleExpertError
 from app.intelligence import agent, analysis, categorize as categorize_module, questions as questions_module
 from app.intelligence.batch_engine import BatchIntelligence, build_batch_intelligence
@@ -80,9 +80,6 @@ TERMINAL_TARGET_STATUSES = frozenset({"completed", "failed"})
 
 CONTACT_HEADERS = ("contact", "phone", "phone_number", "telephone", "number")
 NAME_HEADERS = ("name", "full_name", "employee", "employee_name")
-
-_NOT_DIGITS = re.compile(r"[^0-9+]")
-
 
 # -- thread plumbing ------------------------------------------------------- #
 
@@ -175,17 +172,20 @@ def _company_language(db: Session, company: Employer) -> str:
 def normalize_phone(raw: str) -> str:
     """A phone number reduced to what identifies the person behind it.
 
-    Punctuation and spacing vary between exports of the same list, so
-    ``+251 911 000 001`` and ``+251911000001`` are one person. This is the key the
-    import deduplicates on, which is what removed the need for per-round roster
-    membership: the same number is the same employee, so a second upload updates
-    the row instead of creating a second Abebe nobody can tell apart.
+    Punctuation, spacing and the trunk prefix all vary between exports of the same
+    list, so ``+251 911 000 001``, ``0911000001`` and ``911000001`` are one person.
+    This is the key the import deduplicates on, which is what removed the need for
+    per-round roster membership: the same number is the same employee, so a second
+    upload updates the row instead of creating a second Abebe nobody can tell
+    apart.
+
+    It is deliberately the same function that decides what gets dialed
+    (:func:`app.core.phone.to_e164`). Two different ideas of what makes a number
+    the same number would mean a list that looks deduplicated and a telephone that
+    rings twice.
     """
 
-    cleaned = _NOT_DIGITS.sub("", raw or "")
-    if cleaned.startswith("+"):
-        return "+" + cleaned[1:].lstrip("+")
-    return cleaned
+    return to_e164(raw)
 
 
 def _header_value(row: dict[str, str], candidates: tuple[str, ...]) -> str:
@@ -246,14 +246,17 @@ def import_company_csv(db: Session, company: Employer, content: bytes) -> dict[s
                 "worker_id": worker_id,
                 "name": name,
                 "company_id": company.company_id,
-                "phone_number": contact,
+                # Stored in the form that can be dialed, not as typed: a number
+                # the API would reject is not a contact detail, it is a call that
+                # fails at three in the afternoon for no visible reason.
+                "phone_number": key,
                 "preferred_language": found.preferred_language if found else language,
                 "employer_claims": found.employer_claims if found else {},
                 "is_active": True,
             }
         )
         existing[key] = person
-        entry = {"worker_id": worker_id, "name": name, "phone_number": contact}
+        entry = {"worker_id": worker_id, "name": name, "phone_number": key}
         (updated if found else added).append(entry)
 
     return {
@@ -595,10 +598,19 @@ def is_batch_call(db: Session, call_id: str) -> bool:
 
 
 def batch_result_pending(db: Session, call_id: str) -> bool:
-    """True when a round's call is still waiting for its answers to be extracted."""
+    """True when a round's call has no answers stored against it yet.
+
+    Asked of the answers table rather than of the target's status. A call that was
+    wrongly recorded as failed — because the provider reported a status this code
+    did not recognise, say — has a terminal target and no answers, and reading the
+    status alone made that call permanently unprocessable: its transcript arrived
+    a minute later and was discarded as already finished.
+    """
 
     target = BatchTargetRepository(db).by_call(call_id)
-    return target is not None and target.status not in TERMINAL_TARGET_STATUSES
+    if target is None:
+        return False
+    return WorkerAnswersRepository(db).get((target.batch_id, target.worker_id)) is None
 
 
 def process_batch_call(
