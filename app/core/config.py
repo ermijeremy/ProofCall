@@ -11,7 +11,12 @@ load_dotenv()
 class Settings(BaseModel):
     app_name: str = "CallProof Backend"
     app_version: str = "0.1.0"
-    database_url: str = Field(default_factory=lambda: os.getenv("CALLPROOF_DATABASE_URL", "sqlite:///./callproof.db"))
+    database_url: str = Field(
+        default_factory=lambda: os.getenv(
+            "CALLPROOF_DATABASE_URL",
+            "sqlite:////tmp/callproof.db" if os.getenv("VERCEL") else "sqlite:///./callproof.db",
+        )
+    )
     teleexpert_base_url: str = Field(default_factory=lambda: os.getenv("TELEXPERT_BASE_URL", ""))
     teleexpert_api_key: str = Field(default_factory=lambda: os.getenv("TELEXPERT_API_KEY", ""), repr=False)
     teleexpert_timeout_seconds: int = Field(
