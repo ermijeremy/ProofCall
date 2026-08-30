@@ -6,18 +6,23 @@ derived for this batch alone, and counts keyed on those categories — none of t
 has a fixed shape to declare, and inventing one per batch would buy nothing.
 """
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+import json
+
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.repositories.batches import BatchRepository
-from app.schemas.batch import BatchCreate, BatchMessageCreate
+from app.schemas.batch import BatchCreate, BatchMessageCreate, FixtureReplayCreate
 from app.services.batch_service import (
     batch_detail,
     create_batch,
     handle_message,
     handle_upload,
+    debug_snapshot,
+    replay_fixture,
 )
+from app.services.reporting_service import csv_bytes, report, worker_csv_bytes, worker_report, xlsx_bytes
 
 router = APIRouter(prefix="/batches", tags=["batches"])
 
@@ -64,6 +69,57 @@ def get_batch(batch_id: str, db: Session = Depends(get_db)) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@router.get("/{batch_id}/report")
+def get_report(batch_id: str, db: Session = Depends(get_db)) -> dict:
+    try:
+        return report(db, batch_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/{batch_id}/debug")
+def debug(batch_id: str, db: Session = Depends(get_db)) -> dict:
+    try:
+        return debug_snapshot(db, batch_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/{batch_id}/export")
+def export_report(
+    batch_id: str,
+    format: str = Query(default="json", pattern="^(json|csv|xlsx)$"),
+    db: Session = Depends(get_db),
+) -> Response:
+    try:
+        data = report(db, batch_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    filename = f"callproof-{batch_id}-report"
+    if format == "csv":
+        return Response(csv_bytes(data), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="{filename}.csv"'})
+    if format == "xlsx":
+        return Response(xlsx_bytes(data), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f'attachment; filename="{filename}.xlsx"'})
+    return Response(json.dumps(data, ensure_ascii=False, indent=2), media_type="application/json", headers={"Content-Disposition": f'attachment; filename="{filename}.json"'})
+
+
+@router.get("/{batch_id}/workers/{worker_id}/export")
+def export_worker(
+    batch_id: str,
+    worker_id: str,
+    format: str = Query(default="json", pattern="^(json|csv)$"),
+    db: Session = Depends(get_db),
+) -> Response:
+    try:
+        data = worker_report(db, batch_id, worker_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    filename = f"callproof-{batch_id}-{worker_id}"
+    if format == "csv":
+        return Response(worker_csv_bytes(data), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="{filename}.csv"'})
+    return Response(json.dumps(data, ensure_ascii=False, indent=2), media_type="application/json", headers={"Content-Disposition": f'attachment; filename="{filename}.json"'})
+
+
 @router.post("/{batch_id}/upload")
 async def upload_roster(
     batch_id: str,
@@ -86,3 +142,12 @@ def post_message(batch_id: str, data: BatchMessageCreate, db: Session = Depends(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"messages": _messages(replies), "batch": batch_detail(db, batch_id)}
+
+
+@router.post("/{batch_id}/replay-fixture")
+def replay(batch_id: str, data: FixtureReplayCreate, db: Session = Depends(get_db)) -> dict:
+    try:
+        replay_fixture(db, batch_id, data.worker_id, data.fixture)
+        return {"status": "processed", "batch": batch_detail(db, batch_id)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

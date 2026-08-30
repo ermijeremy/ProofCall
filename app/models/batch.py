@@ -94,3 +94,26 @@ class WorkerAnswers(Base):
     excluded: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     exclusion_reason: Mapped[Any] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class WorkerAnswerRecord(Base):
+    """Immutable answer snapshot for every completed batch call.
+
+    ``WorkerAnswers`` is deliberately kept as the latest-result projection used
+    for batch counts. This table preserves earlier calls when an administrator
+    interviews the same worker again in the same batch.
+    """
+
+    __tablename__ = "worker_answer_records"
+
+    answer_record_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    batch_id: Mapped[str] = mapped_column(ForeignKey("interview_batches.batch_id"), nullable=False, index=True)
+    worker_id: Mapped[str] = mapped_column(ForeignKey("beneficiaries.worker_id"), nullable=False, index=True)
+    call_id: Mapped[str] = mapped_column(ForeignKey("teleexpert_calls.call_id"), nullable=False, unique=True, index=True)
+    answers: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    consent: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    language: Mapped[Any] = mapped_column(String(20), nullable=True)
+    transcript: Mapped[Any] = mapped_column(Text, nullable=True)
+    excluded: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    exclusion_reason: Mapped[Any] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False, index=True)

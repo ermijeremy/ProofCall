@@ -325,17 +325,15 @@ def test_a_payload_without_a_call_id_is_rejected(client: TestClient, data: dict[
 # -- the failure path and the drain -------------------------------------------- #
 
 
-def test_an_event_for_an_unknown_call_is_recorded_as_failed(client: TestClient, db: Session) -> None:
-    """The prerequisite fix. The inner failure poisons the session, so recording it
-    needs a rollback first; without that the event stayed on ``received`` with no
-    error and was never retried."""
+def test_an_event_for_an_unknown_call_is_acknowledged_as_stale(client: TestClient, db: Session) -> None:
+    """A recreated local database cannot recover a provider call it never stored."""
 
     response = post_event(client, event_body("evt_unknown", "call_missing", turns=turns_for("Marta Alemu")))
 
     assert response.status_code == 200
     event = db.get(TeleExpertWebhookEvent, "evt_unknown")
-    assert event.status == "failed"
-    assert event.error == "Call not found: call_missing"
+    assert event.status == "processed"
+    assert event.error == "Ignored stale event; local call not found: call_missing"
     assert event.attempts == 1
 
 
@@ -356,26 +354,18 @@ def test_a_completed_event_without_any_transcript_is_recorded_as_failed(
     assert "did not include a transcript" in event.error
 
 
-def test_the_drain_retries_a_failed_event_and_marks_it_processed(
-    client: TestClient, db: Session
-) -> None:
-    """TeleExpert will not redeliver after the 2xx, so this drain is the only
-    retry an event of this kind ever gets."""
+def test_a_stale_failed_event_is_not_retried_forever(client: TestClient, db: Session) -> None:
+    """A failed provider event for an unknown local call is terminal locally."""
 
     post_event(client, event_body("evt_drain", "call_late", status="failed", error="no answer"))
-    assert db.get(TeleExpertWebhookEvent, "evt_drain").status == "failed"
-
-    store_call(db, "call_late")  # the call arrives after its own webhook did
-    recovered = drain_failed_events()
-
-    assert recovered == ["evt_drain"]
+    assert drain_failed_events() == []
     db.expire_all()
     event = db.get(TeleExpertWebhookEvent, "evt_drain")
     assert event.status == "processed"
-    assert event.attempts == 2
+    assert event.attempts == 1
 
 
-def test_the_drain_gives_up_on_an_event_that_keeps_failing(client: TestClient, db: Session) -> None:
+def test_a_stale_event_is_processed_once(client: TestClient, db: Session) -> None:
     post_event(client, event_body("evt_stuck", "call_never", status="failed"))
 
     for _ in range(5):
@@ -383,9 +373,8 @@ def test_the_drain_gives_up_on_an_event_that_keeps_failing(client: TestClient, d
 
     db.expire_all()
     event = db.get(TeleExpertWebhookEvent, "evt_stuck")
-    assert event.status == "failed"
-    # Capped: a permanently broken event must not be retried on every poll.
-    assert event.attempts == 3
+    assert event.status == "processed"
+    assert event.attempts == 1
 
 
 def test_the_drain_leaves_a_processed_event_alone(client: TestClient, db: Session) -> None:

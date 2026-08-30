@@ -1,6 +1,6 @@
 """Worker, company, and programme verification endpoints."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -23,8 +23,8 @@ def company_verification(company_id: str, db: Session = Depends(get_db)) -> dict
 
 
 @router.get("/workers/{worker_id}")
-def evidence(worker_id: str, db: Session = Depends(get_db)) -> dict:
+def evidence(worker_id: str, call_id: str | None = Query(default=None), db: Session = Depends(get_db)) -> dict:
     try:
-        return worker_evidence_detail(db, worker_id)
+        return worker_evidence_detail(db, worker_id, call_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

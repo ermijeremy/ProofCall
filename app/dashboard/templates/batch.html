@@ -10,6 +10,20 @@
   <span class="phase phase-{{ batch.status }}" id="phase-chip">{{ batch.status }}</span>
 </div>
 
+<section class="batch-hero">
+  <div class="hero-copy">
+    <span class="eyebrow">INTERVIEW ROUND</span>
+    <h2 id="hero-title">{{ batch.title or "Interview batch" }}</h2>
+    <p>Worker answers, media, categories, and programme signals in one review space.</p>
+  </div>
+  <div class="hero-actions">
+    <a class="hero-action" href="/api/batches/{{ batch.batch_id }}/report" target="_blank">Open report <span>↗</span></a>
+    <a class="hero-action hero-action-primary" href="/api/batches/{{ batch.batch_id }}/export?format=xlsx">Download Excel <span>↓</span></a>
+  </div>
+</section>
+
+<section class="metric-grid" id="metrics"></section>
+
 <div class="thread-shell">
   <div class="thread" id="thread"></div>
 
@@ -26,8 +40,50 @@
       <h3>Questions</h3>
       <div id="questions"></div>
     </div>
+    <div class="side-card">
+      <h3>Exports</h3>
+      <div class="export-links"><a href="/api/batches/{{ batch.batch_id }}/export?format=xlsx">Excel workbook</a><a href="/api/batches/{{ batch.batch_id }}/export?format=csv">CSV report</a><a href="/api/batches/{{ batch.batch_id }}/export?format=json">JSON report</a></div>
+    </div>
+    <div class="side-card">
+      <h3>SDG mapping</h3>
+      <div id="sdg"></div>
+    </div>
+    <div class="side-card">
+      <h3>Admin exports</h3>
+      <p class="side-note">Download the current batch report for analysis or sharing with the monitoring team.</p>
+      <div class="export-buttons">
+        <a href="/api/batches/{{ batch.batch_id }}/export?format=xlsx">Excel workbook</a>
+        <a href="/api/batches/{{ batch.batch_id }}/export?format=csv">CSV spreadsheet</a>
+        <a href="/api/batches/{{ batch.batch_id }}/export?format=json">JSON data</a>
+      </div>
+    </div>
+    <div class="side-card fixture-card">
+      <h3>Local validation</h3>
+      <p class="side-note">Replay a saved TeleExpert transcript through the real completion pipeline. No phone call is placed.</p>
+      <select id="fixture-worker" class="fixture-select"></select>
+      <select id="fixture-name" class="fixture-select">
+        <option value="normal_worker">Normal worker</option>
+        <option value="ambiguous_duration">Ambiguous duration</option>
+        <option value="salary_refusal">Salary refusal</option>
+        <option value="under_15_stopped">Under-15 stopped</option>
+        <option value="salary_contradiction">Salary contradiction</option>
+        <option value="employment_status_contradiction">Employment contradiction</option>
+      </select>
+      <button id="replay-fixture" class="fixture-button" type="button">Replay transcript</button>
+      <p id="fixture-result" class="form-result"></p>
+    </div>
+    <div class="side-card">
+      <h3>Pipeline inspector</h3>
+      <p class="side-note">See exactly what was saved after extraction, safeguarding, categorization, and aggregation.</p>
+      <button id="inspect-pipeline" class="fixture-button" type="button">Inspect pipeline output</button>
+    </div>
   </div>
 </div>
+<section class="debug-panel" id="debug-panel" hidden>
+  <div class="debug-heading"><div><span class="eyebrow">TRACE / POST-COMPLETION</span><h2>Pipeline output</h2></div><button id="close-debug" type="button">Close</button></div>
+  <p class="side-note">This is the normalized data CallProof stored and counted. It is the best place to diagnose a bad transcript or extraction.</p>
+  <pre id="debug-output"></pre>
+</section>
 
 <div class="composer">
   <form id="composer">
@@ -85,6 +141,24 @@
     return `<div class="card"><h4>${summary.interviews_counted} counted · ${summary.excluded_total} excluded</h4>${blocks}${excluded}</div>`;
   }
 
+  function renderMetrics(batch) {
+    const progress = batch.progress || {};
+    const summary = batch.summary || {};
+    const total = progress.selected || 0;
+    const returned = progress.returned || 0;
+    const counted = summary.interviews_counted || 0;
+    const excluded = summary.excluded_total || 0;
+    const cards = [
+      ["Interviews selected", total, "workers in this round", "metric-blue"],
+      ["Answers received", returned, total ? `${Math.round(returned / total * 100)}% response rate` : "waiting to start", "metric-teal"],
+      ["Included in analysis", counted, "usable worker responses", "metric-purple"],
+      ["Safeguarding / excluded", excluded, "removed from all counts", "metric-amber"],
+    ];
+    document.getElementById("metrics").innerHTML = cards.map(([label, value, note, color]) =>
+      `<div class="metric-card ${color}"><span>${escape(label)}</span><strong>${escape(value)}</strong><small>${escape(note)}</small></div>`
+    ).join("");
+  }
+
   function card(payload) {
     if (!payload) return "";
     if (payload.kind === "summary" && payload.summary) return summaryCard(payload.summary);
@@ -100,7 +174,7 @@
       return `<div class="card"><h4>Questions to ask</h4><ol>${items}</ol></div>`;
     }
     if (payload.kind === "roster" && payload.workers) {
-      const items = payload.workers.map((worker) => `<li>${escape(worker.name)} — ${escape(worker.contact)}</li>`).join("");
+        const items = payload.workers.map((worker) => `<li>${escape(worker.name)} — ${escape(worker.phone_number || worker.contact)}</li>`).join("");
       return `<div class="card"><h4>${payload.workers.length} on the list</h4><ul>${items}</ul></div>`;
     }
     if (payload.kind === "selection" && payload.selected) {
@@ -118,6 +192,7 @@
   }
 
   function renderSide(batch) {
+    renderMetrics(batch);
     const progress = batch.progress || {};
     document.getElementById("progress").innerHTML = `
       <div class="progress-line"><span>Selected</span><b>${progress.selected || 0}</b></div>
@@ -126,12 +201,16 @@
       <div class="progress-line"><span>Language</span><b>${escape(batch.language)}</b></div>`;
 
     const roster = batch.roster || [];
+    const workerSelect = document.getElementById("fixture-worker");
+    if (workerSelect && !workerSelect.options.length) {
+      workerSelect.innerHTML = roster.map((person) => `<option value="${escape(person.worker_id)}">${escape(person.name)}</option>`).join("");
+    }
     document.getElementById("roster").innerHTML = roster.length
       ? roster.map((person) => {
           const state = person.excluded ? "excluded" : (person.call_status || (person.selected ? "selected" : "waiting"));
           return `<div class="roster-row"><span class="dot dot-${escape(state)}"></span>
-            <span class="grow">${escape(person.name)}<small>${escape(person.contact)}</small></span>
-            <small>${escape(state)}</small></div>`;
+            <span class="grow">${escape(person.name)}<small>${escape(person.phone_number)}</small></span>
+            <small>${escape(state)}${person.audio_url ? ` · <a href="${escape(person.audio_url)}" target="_blank">audio</a>` : ""}${person.transcript_url ? ` · <a href="${escape(person.transcript_url)}" target="_blank">transcript</a>` : ""}${person.answered ? ` · <a href="/api/batches/${BATCH_ID}/workers/${encodeURIComponent(person.worker_id)}/export?format=json" target="_blank">JSON</a>` : ""}</small></div>`;
         }).join("")
       : `<p class="muted">No CSV uploaded yet.</p>`;
 
@@ -139,6 +218,40 @@
     document.getElementById("questions").innerHTML = questions.length
       ? `<ol style="margin:0;padding-left:18px;font-size:13px">${questions.map((question) => `<li>${escape(question.text)}</li>`).join("")}</ol>`
       : `<p class="muted">No questions typed yet.</p>`;
+
+    const sdg = batch.sdg_mapping || {};
+    document.getElementById("sdg").innerHTML = Object.entries(sdg).map(([code, item]) =>
+      `<div class="progress-line"><span>${escape(code)} · ${escape(item.name)}</span><b>${item.status === "available" ? "Ready" : "No data"}</b></div>`
+    ).join("");
+  }
+
+  async function replayFixture() {
+    const worker = document.getElementById("fixture-worker").value;
+    const fixture = document.getElementById("fixture-name").value;
+    const result = document.getElementById("fixture-result");
+    if (!worker) { result.textContent = "Upload a roster first."; result.className = "form-result error"; return; }
+    result.textContent = "Processing transcript…";
+    result.className = "form-result";
+    const response = await fetch(`/api/batches/${BATCH_ID}/replay-fixture`, {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({worker_id: worker, fixture}),
+    });
+    const body = await response.json();
+    if (!response.ok) { result.textContent = body.detail || "Replay failed."; result.className = "form-result error"; return; }
+    result.textContent = "Transcript processed. Results refreshed.";
+    result.className = "form-result success";
+    render(body.batch);
+  }
+
+  async function inspectPipeline() {
+    const panel = document.getElementById("debug-panel");
+    const output = document.getElementById("debug-output");
+    output.textContent = "Loading pipeline output…";
+    panel.hidden = false;
+    const response = await fetch(`/api/batches/${BATCH_ID}/debug`);
+    const body = await response.json();
+    output.textContent = response.ok ? JSON.stringify(body, null, 2) : (body.detail || "Could not load pipeline output.");
+    panel.scrollIntoView({behavior: "smooth", block: "start"});
   }
 
   function render(batch) {
@@ -225,6 +338,9 @@
   });
 
   render(INITIAL);
+  document.getElementById("replay-fixture").addEventListener("click", replayFixture);
+  document.getElementById("inspect-pipeline").addEventListener("click", inspectPipeline);
+  document.getElementById("close-debug").addEventListener("click", () => { document.getElementById("debug-panel").hidden = true; });
   textarea.focus();
 </script>
 {% endblock %}

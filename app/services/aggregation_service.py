@@ -138,13 +138,20 @@ def aggregate_programme(db: Session) -> dict[str, Any]:
     }
 
 
-def worker_evidence_detail(db: Session, worker_id: str) -> dict[str, Any]:
+def worker_evidence_detail(db: Session, worker_id: str, call_id: str | None = None) -> dict[str, Any]:
     worker = BeneficiaryRepository(db).get(worker_id)
-    evidence = EvidenceRepository(db).get(worker_id)
-    if worker is None or evidence is None:
+    latest = EvidenceRepository(db).get(worker_id)
+    if worker is None or latest is None:
         raise ValueError(f"Worker evidence not found: {worker_id}")
     calls = CallRepository(db).for_worker(worker_id)
-    call = next((item for item in calls if item.call_id == evidence.call_id), calls[-1] if calls else None)
+    history = EvidenceRepository(db).history_for_worker(worker_id)
+    evidence = latest
+    if call_id and call_id != latest.call_id:
+        evidence = next((item for item in history if item.call_id == call_id), None)
+        if evidence is None:
+            raise ValueError(f"Evidence not found for call: {call_id}")
+    selected_call_id = evidence.call_id
+    call = next((item for item in calls if item.call_id == selected_call_id), None)
     return {
         "worker_id": worker_id,
         "company_id": worker.company_id,
@@ -152,12 +159,36 @@ def worker_evidence_detail(db: Session, worker_id: str) -> dict[str, Any]:
         "call_id": evidence.call_id,
         "call_status": call.status if call else "completed",
         "transcript": call.transcript if call else None,
+        "transcript_turns": call.transcript_turns if call else [],
+        "language": call.language if call else worker.preferred_language,
         "audio_url": call.audio_url if call else None,
         "consent": evidence.consent,
         "safeguarding_flag": evidence.safeguarding_flag,
         "clauses": evidence.clauses,
         "contradictions": evidence.contradictions,
         "overall_verdict": evidence.overall_verdict,
+        "is_latest": selected_call_id == latest.call_id,
+        "evidence_history": [
+            {
+                "call_id": item.call_id,
+                "overall_verdict": item.overall_verdict,
+                "safeguarding_flag": item.safeguarding_flag,
+                "processed_at": item.processed_at,
+                "is_latest": item.call_id == latest.call_id,
+            }
+            for item in history
+        ],
+        "call_history": [
+            {
+                "call_id": item.call_id,
+                "status": item.status,
+                "created_at": item.created_at,
+                "completed_at": item.completed_at,
+                "audio_url": item.audio_url,
+                "has_transcript": bool(item.transcript),
+            }
+            for item in sorted(calls, key=lambda item: item.created_at or 0, reverse=True)
+        ],
     }
 
 

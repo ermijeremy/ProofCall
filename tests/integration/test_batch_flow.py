@@ -359,6 +359,8 @@ def test_a_call_that_never_produced_an_interview_still_finishes_the_batch(
     assert batch_service.batch_summary(db, batch)["interviews_counted"] == 1
 
 
+
+
 def test_the_summary_card_is_posted_with_the_counts_attached(
     db: Session, intelligence: BatchIntelligence, provider: FakeBatchProvider
 ):

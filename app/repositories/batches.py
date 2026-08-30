@@ -3,7 +3,7 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.batch import BatchMessage, BatchTarget, InterviewBatch, WorkerAnswers
+from app.models.batch import BatchMessage, BatchTarget, InterviewBatch, WorkerAnswerRecord, WorkerAnswers
 from app.repositories.base import Repository
 
 
@@ -106,9 +106,23 @@ class WorkerAnswersRepository(Repository[WorkerAnswers]):
         return record
 
 
+class WorkerAnswerRecordRepository(Repository[WorkerAnswerRecord]):
+    def __init__(self, db: Session) -> None:
+        super().__init__(db, WorkerAnswerRecord)
+
+    def for_batch(self, batch_id: str) -> list[WorkerAnswerRecord]:
+        statement = select(WorkerAnswerRecord).where(WorkerAnswerRecord.batch_id == batch_id).order_by(WorkerAnswerRecord.created_at)
+        return list(self.db.scalars(statement).all())
+
+    def by_call(self, call_id: str) -> WorkerAnswerRecord | None:
+        statement = select(WorkerAnswerRecord).where(WorkerAnswerRecord.call_id == call_id)
+        return self.db.scalars(statement).first()
+
+
 __all__ = [
     "BatchMessageRepository",
     "BatchRepository",
     "BatchTargetRepository",
     "WorkerAnswersRepository",
+    "WorkerAnswerRecordRepository",
 ]

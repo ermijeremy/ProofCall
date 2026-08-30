@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
-from app.integrations.teleexpert_client import TeleExpertClient
+from app.integrations.teleexpert_client import TeleExpertClient, TeleExpertError
 from app.models.call import TeleExpertCall
 from app.models.webhook import TeleExpertWebhookEvent
 from app.repositories.calls import CallRepository
@@ -106,7 +106,15 @@ def process_webhook_event(event_id: str) -> None:
         try:
             call = CallRepository(db).get(event.call_id)
             if call is None:
-                raise ValueError(f"Call not found: {event.call_id}")
+                # This can happen after the local database is recreated while
+                # TeleExpert still drains an older webhook queue. There is no
+                # local call to update and retrying can never recover it.
+                event.status = "processed"
+                event.error = f"Ignored stale event; local call not found: {event.call_id}"
+                event.processed_at = datetime.utcnow()
+                db.commit()
+                logger.warning("Ignored webhook event %s for missing call %s", event_id, event.call_id)
+                return
             call_payload = event.payload["data"]["call"]
             client = TeleExpertClient()
             updated = update_call_from_status(db, call, call_payload)
@@ -117,10 +125,15 @@ def process_webhook_event(event_id: str) -> None:
             if updated.status == "completed":
                 if values["audio_url"]:
                     values["audio_url"] = client.absolute_url(values["audio_url"])
-                if not values["transcript_turns"] and not values["transcript"]:
-                    transcript_payload = client.get_transcript(updated.call_id)
-                    values["transcript_turns"] = transcript_payload.get("turns", [])
-                    values["transcript"] = transcript_from_turns(values["transcript_turns"])
+                if not values["transcript_turns"]:
+                    try:
+                        transcript_payload = client.get_transcript(updated.call_id)
+                        values["transcript_turns"] = transcript_payload.get("turns", [])
+                        if values["transcript_turns"]:
+                            values["transcript"] = transcript_from_turns(values["transcript_turns"])
+                    except TeleExpertError:
+                        if not values["transcript"]:
+                            raise
                 if not values["transcript"]:
                     raise ValueError("Completed TeleExpert call did not include a transcript")
                 dispatch_completed_call(db, updated.call_id, values)

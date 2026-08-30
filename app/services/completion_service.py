@@ -32,17 +32,20 @@ def store_completed_result(db: Session, result: CompletedCallResult):
             "completed_at": call.completed_at or datetime.utcnow(),
         },
     )
-    return EvidenceRepository(db).upsert(
-        {
-            "worker_id": result.worker_id,
-            "call_id": result.call_id,
-            "consent": result.consent,
-            "safeguarding_flag": result.safeguarding_flag,
-            "clauses": {name: clause.model_dump() for name, clause in result.clauses.items()},
-            "contradictions": [item.model_dump() for item in result.contradictions],
-            "overall_verdict": result.overall_verdict,
-        }
-    )
+    values = {
+        "worker_id": result.worker_id,
+        "call_id": result.call_id,
+        "consent": result.consent,
+        "safeguarding_flag": result.safeguarding_flag,
+        "clauses": {name: clause.model_dump() for name, clause in result.clauses.items()},
+        "contradictions": [item.model_dump() for item in result.contradictions],
+        "overall_verdict": result.overall_verdict,
+    }
+    evidence = EvidenceRepository(db)
+    # The call ID is the idempotency key. A webhook retry must not create a
+    # second history row, while a later interview for the same worker must.
+    evidence.append_record(values)
+    return evidence.upsert(values)
 
 
 def process_completed_call(

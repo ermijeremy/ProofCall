@@ -227,6 +227,65 @@
   color: var(--muted);
 }
 
+/* -- completed-round overview ------------------------------------------ */
+.batch-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin: 8px 0 18px;
+  padding: 26px 28px;
+  border: 1px solid #d9e7e6;
+  border-radius: 18px;
+  background: linear-gradient(120deg, #f0fbf9 0%, #f8fbff 72%);
+  box-shadow: 0 10px 28px rgba(24, 61, 80, .05);
+}
+.hero-copy h2 { margin: 5px 0 6px; color: var(--navy); font-size: 25px; letter-spacing: -.03em; }
+.hero-copy p { margin: 0; color: var(--muted); font-size: 13px; }
+.hero-actions { display: flex; flex-wrap: wrap; gap: 9px; }
+.hero-action, .export-buttons a {
+  display: inline-flex; align-items: center; gap: 7px; text-decoration: none;
+  border: 1px solid #cbdcd9; border-radius: 9px; padding: 10px 13px;
+  color: #24565d; background: rgba(255,255,255,.8); font-size: 11px; font-weight: 700;
+}
+.hero-action-primary { border-color: var(--teal); background: var(--teal); color: #fff; }
+.hero-action:hover, .export-buttons a:hover { transform: translateY(-1px); box-shadow: 0 5px 14px rgba(23, 75, 84, .1); }
+.metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }
+.metric-card { position: relative; overflow: hidden; min-height: 96px; padding: 16px 17px; border: 1px solid var(--line); border-radius: 14px; background: var(--paper); }
+.metric-card::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; background: #9aa8b9; }
+.metric-card span, .metric-card small { display: block; color: var(--muted); font-size: 10px; }
+.metric-card strong { display: block; margin: 7px 0 3px; color: var(--navy); font-size: 26px; line-height: 1; letter-spacing: -.04em; }
+.metric-blue::before { background: #5b80c8; } .metric-teal::before { background: var(--teal); }
+.metric-purple::before { background: #8a6bc1; } .metric-amber::before { background: var(--amber); }
+.side-note { margin: -3px 0 13px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.export-buttons { display: grid; gap: 7px; }
+.export-buttons a { justify-content: space-between; padding: 8px 10px; font-size: 11px; }
+.export-buttons a::after { content: "↓"; color: var(--teal); font-size: 14px; }
+.fixture-select { width: 100%; box-sizing: border-box; margin-bottom: 8px; padding: 9px 10px; border: 1px solid #dbe3ed; border-radius: 8px; background: #fff; color: var(--ink); font: 12px 'DM Sans', sans-serif; }
+.fixture-button { width: 100%; border: 0; border-radius: 8px; padding: 10px; background: #243b53; color: #fff; font-size: 11px; font-weight: 700; cursor: pointer; }
+.fixture-button:hover { background: #172d43; }
+.debug-panel { margin: 22px 0 150px; padding: 22px; border: 1px solid #cbdcd9; border-radius: 16px; background: #102a35; color: #d9f4ef; box-shadow: 0 14px 34px rgba(16, 42, 53, .14); }
+.debug-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.debug-heading h2 { margin: 5px 0 0; color: #fff; font-size: 21px; }
+.debug-heading button { border: 1px solid #55727a; border-radius: 7px; padding: 7px 10px; background: transparent; color: #d9f4ef; cursor: pointer; }
+.debug-panel .side-note { color: #a8c9c7; }
+.debug-panel pre { max-height: 620px; overflow: auto; margin: 18px 0 0; padding: 16px; border: 1px solid #264b55; border-radius: 10px; background: #081b23; color: #c5ebe5; font: 11px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.sdg-status { color: var(--teal); font-size: 10px; font-weight: 700; }
+
+@media (max-width: 900px) {
+  .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .batch-hero { align-items: flex-start; flex-direction: column; }
+}
+@media (max-width: 680px) {
+  .metric-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .batch-hero { padding: 20px; }
+  .hero-actions { width: 100%; }
+  .hero-action { flex: 1; justify-content: center; }
+  .thread-shell { grid-template-columns: 1fr; }
+  .side-stack { position: static; }
+  .composer { left: 0; padding-left: 12px; padding-right: 12px; }
+}
+
 .roster-row {
   display: flex;
   align-items: center;
@@ -282,3 +341,7 @@
   font-style: italic;
   margin-top: 2px;
 }
+
+.export-links { display: grid; gap: 8px; }
+.export-links a { color: #087a74; font-size: 12px; font-weight: 700; text-decoration: none; }
+.export-links a:hover { text-decoration: underline; }

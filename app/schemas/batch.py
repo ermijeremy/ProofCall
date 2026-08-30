@@ -10,3 +10,8 @@ class BatchCreate(BaseModel):
 
 class BatchMessageCreate(BaseModel):
     text: str = Field(min_length=1)
+
+
+class FixtureReplayCreate(BaseModel):
+    worker_id: str = Field(min_length=1)
+    fixture: str = Field(min_length=1)

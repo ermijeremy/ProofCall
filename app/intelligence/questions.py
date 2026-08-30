@@ -86,7 +86,19 @@ def parse_questions(text: str) -> list[str]:
         # "1 - text", "1. text", "1) text", "- text", "* text"
         cleaned = re.sub(r"^\s*(?:\d+\s*[-.)\]:]|[-*•])\s*", "", line).strip()
         if cleaned:
-            parts.append(cleaned)
+            # Admins often type a natural instruction instead of a numbered
+            # list (for example, "ask about age and salary"). Keep the
+            # question-set contract one question at a time for the voice agent.
+            command = re.search(r"\b(?:ask(?:\s+him|\s+her|\s+them)?\s+about|questions?\s+about|ask)\s+(.+)$", cleaned, re.IGNORECASE)
+            candidate = command.group(1).strip() if command else cleaned
+            if re.search(r"\bage\b", candidate, re.IGNORECASE) and re.search(
+                r"\b(?:salary|pay|wage|compensation|income)\b", candidate, re.IGNORECASE
+            ):
+                split = re.split(r"\s+and\s+", candidate, maxsplit=1, flags=re.IGNORECASE)
+                if len(split) == 2:
+                    parts.extend(piece.strip().rstrip("?.") + "?" for piece in split if piece.strip())
+                    continue
+            parts.append(candidate)
     if len(parts) == 1:
         # A single line may still hold several numbered questions.
         inline = re.split(r"(?:^|\s)\d+\s*[-.)\]:]\s*", parts[0])
@@ -220,7 +232,11 @@ def build_question_set(texts: list[str | dict[str, Any]]) -> list[dict[str, Any]
                 {"index": 0, "text": item["text"], "slug": AGE_SLUG, "original": item["original"], "topic": "age"}
             )
             continue
-        source = item["topic"] or item["text"]
+        # Keep the field name stable for the batch and for later answer records.
+        # A model-supplied topic is descriptive metadata, not an identifier:
+        # changing it would make the same admin question address a different
+        # column between model responses.
+        source = item["original"] or item["text"]
         slug = slugify(source, fallback=f"question_{index}")
         if slug in used:
             slug = f"{slug}_{index}"

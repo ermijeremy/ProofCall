@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
@@ -87,9 +87,14 @@ def company_page(request: Request, company_id: str, db: Session = Depends(get_db
 
 
 @router.get("/workers/{worker_id}", include_in_schema=False)
-def worker_page(request: Request, worker_id: str, db: Session = Depends(get_db)):
+def worker_page(
+    request: Request,
+    worker_id: str,
+    call_id: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
     try:
-        worker = worker_evidence_detail(db, worker_id)
+        worker = worker_evidence_detail(db, worker_id, call_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return templates.TemplateResponse(

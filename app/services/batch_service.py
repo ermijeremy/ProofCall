@@ -18,6 +18,10 @@ Two rules shape the whole file:
 from __future__ import annotations
 
 import logging
+import json
+import re
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -27,12 +31,15 @@ from app.core.config import settings
 from app.integrations.teleexpert_client import TeleExpertError
 from app.intelligence import analysis, categorize as categorize_module, questions as questions_module
 from app.intelligence.batch_engine import BatchIntelligence, build_batch_intelligence
-from app.models.batch import BatchMessage, BatchTarget, InterviewBatch, WorkerAnswers
+from app.intelligence.providers.base import ProviderError
+from app.models.batch import BatchMessage, BatchTarget, InterviewBatch, WorkerAnswerRecord, WorkerAnswers
+from app.models.call import TeleExpertCall
 from app.repositories.batches import (
     BatchMessageRepository,
     BatchRepository,
     BatchTargetRepository,
     WorkerAnswersRepository,
+    WorkerAnswerRecordRepository,
 )
 from app.repositories.beneficiaries import BeneficiaryRepository
 from app.repositories.employers import EmployerRepository
@@ -243,6 +250,8 @@ def roster(db: Session, batch: InterviewBatch) -> list[dict[str, Any]]:
                 "selected": target is not None,
                 "call_status": target.status if target else None,
                 "call_id": target.call_id if target else None,
+                "audio_url": f"/api/teleexpert/calls/{target.call_id}/audio" if target and target.call_id else None,
+                "transcript_url": f"/api/teleexpert/calls/{target.call_id}/transcript" if target and target.call_id else None,
                 "answered": record is not None,
                 "excluded": bool(record.excluded) if record else False,
                 "exclusion_reason": record.exclusion_reason if record else None,
@@ -313,6 +322,8 @@ def batch_detail(db: Session, batch_id: str) -> dict[str, Any]:
     if batch is None:
         raise ValueError(f"Batch not found: {batch_id}")
     targets = BatchTargetRepository(db).for_batch(batch_id)
+    summary = batch_summary(db, batch)
+    from app.services.reporting_service import sdg_mapping
     return {
         "batch_id": batch.batch_id,
         "title": batch.title,
@@ -335,7 +346,13 @@ def batch_detail(db: Session, batch_id: str) -> dict[str, Any]:
             "returned": len([target for target in targets if target.status in TERMINAL_TARGET_STATUSES]),
             "waiting": len([target for target in targets if target.status not in TERMINAL_TARGET_STATUSES]),
         },
-        "summary": batch_summary(db, batch),
+        "summary": summary,
+        "sdg_mapping": sdg_mapping(summary),
+        "exports": {
+            "json": f"/api/batches/{batch_id}/export?format=json",
+            "csv": f"/api/batches/{batch_id}/export?format=csv",
+            "xlsx": f"/api/batches/{batch_id}/export?format=xlsx",
+        },
         "messages": [
             {
                 "message_id": message.message_id,
@@ -346,6 +363,48 @@ def batch_detail(db: Session, batch_id: str) -> dict[str, Any]:
             }
             for message in BatchMessageRepository(db).for_batch(batch_id)
         ],
+    }
+
+
+def debug_snapshot(db: Session, batch_id: str) -> dict[str, Any]:
+    """Expose normalized post-call stages for local/admin troubleshooting."""
+    batch = BatchRepository(db).get(batch_id)
+    if batch is None:
+        raise ValueError(f"Batch not found: {batch_id}")
+    answers = {item.worker_id: item for item in WorkerAnswersRepository(db).for_batch(batch_id)}
+    calls = {item.call_id: item for item in CallRepository(db).list() if item.call_id}
+    workers = []
+    for person in roster_people(db, batch):
+        answer = answers.get(person.worker_id)
+        call = calls.get(answer.call_id) if answer and answer.call_id else None
+        workers.append({
+            "worker_id": person.worker_id,
+            "call": {
+                "call_id": call.call_id if call else answer.call_id if answer else None,
+                "status": call.status if call else None,
+                "language": call.language if call else answer.language if answer else None,
+                "audio_url": call.audio_url if call else None,
+                "transcript": call.transcript if call else answer.transcript if answer else None,
+                "transcript_turns": call.transcript_turns if call else [],
+            },
+            "extraction": {
+                "answers": answer.answers if answer else {},
+                "consent": answer.consent if answer else None,
+            },
+            "safeguarding": {
+                "excluded": answer.excluded if answer else None,
+                "reason": answer.exclusion_reason if answer else None,
+            },
+        })
+    summary = batch_summary(db, batch)
+    from app.services.reporting_service import sdg_mapping
+    return {
+        "batch_id": batch_id,
+        "stages": ["teleexpert_result", "extraction", "safeguarding", "categorization", "aggregation", "sdg_mapping"],
+        "workers": workers,
+        "categorization": batch.categories or {},
+        "aggregation": summary,
+        "sdg_mapping": sdg_mapping(summary),
     }
 
 
@@ -448,6 +507,19 @@ def select_targets(
     from app.intelligence import selection as selection_module
 
     spec = intelligence.parse_selection(instruction)
+    # Keep simple, unambiguous name requests reliable even if the selection
+    # model is uncertain ("for Abebe", "call Abebe", or "call Abebe and Marta").
+    # We only use this fallback when every requested name matches the roster;
+    # ambiguous or unmatched input still goes through the safe clarification path.
+    if spec.get("mode") == "unclear":
+        candidate = re.sub(r"^\s*(?:for|call|select)\s+", "", instruction, flags=re.IGNORECASE).strip()
+        names = [part.strip() for part in re.split(r"\s+and\s+|,", candidate, flags=re.IGNORECASE) if part.strip()]
+        roster_names = [person.get("name", "") for person in roster(db, batch)]
+        if names and all(
+            any(name.casefold() == roster_name.casefold() or name.casefold() in roster_name.casefold() for roster_name in roster_names)
+            for name in names
+        ):
+            spec = {"mode": "explicit", "names": names, "exclude_already_called": False, "confidence": "HIGH"}
     resolution = selection_module.resolve(
         spec,
         roster(db, batch),
@@ -620,6 +692,21 @@ def process_batch_call(
             "exclusion_reason": extraction["exclusion_reason"],
         }
     )
+    history = WorkerAnswerRecordRepository(db)
+    if history.by_call(call_id) is None:
+        db.add(WorkerAnswerRecord(
+            answer_record_id=uuid4().hex,
+            batch_id=batch.batch_id,
+            worker_id=target.worker_id,
+            call_id=call_id,
+            answers=extraction["answers"],
+            consent=extraction["consent"],
+            language=extraction["language"] or language,
+            transcript=transcript,
+            excluded=extraction["excluded"],
+            exclusion_reason=extraction["exclusion_reason"],
+        ))
+        db.commit()
     target_repository.update(target, {"status": "completed"})
 
     person = BeneficiaryRepository(db).get(target.worker_id)
@@ -640,6 +727,51 @@ def process_batch_call(
         )
     finalize_if_complete(db, batch, engine)
     return record
+
+
+def replay_fixture(db: Session, batch_id: str, worker_id: str, fixture_name: str) -> WorkerAnswers:
+    """Replay a recorded transcript through the real batch completion path.
+
+    Local development only: this never creates a TeleExpert request or places a
+    call. The transcript still goes through normal extraction and safeguarding.
+    """
+    batch = BatchRepository(db).get(batch_id)
+    person = BeneficiaryRepository(db).get(worker_id)
+    roster_ids = {item.worker_id for item in roster_people(db, batch)} if batch else set()
+    if batch is None or person is None or worker_id not in roster_ids:
+        raise ValueError("Worker is not on this batch roster")
+    fixture_path = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "transcripts" / f"{fixture_name}.json"
+    if not fixture_name.replace("_", "").isalnum() or not fixture_path.is_file():
+        raise ValueError("Unknown transcript fixture")
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    transcript = fixture.get("transcript")
+    if not isinstance(transcript, str) or not transcript.strip():
+        raise ValueError("Fixture has no transcript")
+    target_repository = BatchTargetRepository(db)
+    target = next((item for item in target_repository.for_batch(batch_id) if item.worker_id == worker_id), None)
+    if target is None:
+        target = BatchTarget(batch_id=batch_id, worker_id=worker_id, status="selected")
+        db.add(target)
+        db.commit()
+        db.refresh(target)
+    if target.call_id:
+        raise ValueError("This worker already has a call in this batch")
+    call_id = f"fixture_call_{uuid4().hex}"
+    db.add(TeleExpertCall(
+        call_id=call_id,
+        worker_id=worker_id,
+        phone_number=person.phone_number,
+        prompt="Recorded local transcript fixture",
+        response_format="both",
+        status="completed",
+        transcript=transcript,
+        transcript_turns=fixture.get("transcript_turns") or [],
+        language=fixture.get("language") or batch.language,
+        completed_at=datetime.utcnow(),
+    ))
+    db.commit()
+    target_repository.update(target, {"call_id": call_id, "status": "dialing"})
+    return process_batch_call(db, call_id, transcript, fixture.get("language") or batch.language)
 
 
 def mark_call_failed(db: Session, call_id: str, reason: str | None = None) -> None:
@@ -676,15 +808,28 @@ def finalize_if_complete(
     sent: they are counted nowhere, so they must not shape the categories either.
     """
 
+    # Webhooks and the automatic status synchronizer can observe the same
+    # terminal call close together. The result may be updated, but the batch
+    # must not emit duplicate "all interviews are back" messages.
+    if batch.status == COMPLETE:
+        return True
+
     targets = BatchTargetRepository(db).for_batch(batch.batch_id)
     if not targets or any(target.status not in TERMINAL_TARGET_STATUSES for target in targets):
         return False
 
     records = [record for record in records_for(db, batch) if not record["excluded"]]
     if records:
-        engine = intelligence or build_batch_intelligence()
-        categories = engine.categorize(batch.questions or [], records)
-        categorize_module.apply_categories(records, categories)
+        try:
+            engine = intelligence or build_batch_intelligence()
+            categories = engine.categorize(batch.questions or [], records)
+            categorize_module.apply_categories(records, categories)
+        except ProviderError:
+            # A completed telephone interview must remain visible even when the
+            # categorization provider is temporarily unavailable. Answers and
+            # states are still countable; the admin can re-categorize later.
+            logger.exception("Categorization provider unavailable; retaining uncategorized answers")
+            categories = {}
         repository = WorkerAnswersRepository(db)
         for record in records:
             stored = repository.get((batch.batch_id, record["worker_id"]))
@@ -884,6 +1029,7 @@ __all__ = [
     "batch_listing",
     "batch_result_pending",
     "batch_summary",
+    "debug_snapshot",
     "create_batch",
     "dial_selection",
     "finalize_if_complete",
@@ -893,6 +1039,7 @@ __all__ = [
     "is_batch_call",
     "mark_call_failed",
     "process_batch_call",
+    "replay_fixture",
     "records_for",
     "roster",
     "roster_people",

@@ -33,6 +33,7 @@ from app.intelligence.providers.fixture import RecordedProvider
 from app.models.beneficiary import Beneficiary
 from app.models.call import TeleExpertCall
 from app.models.employer import Employer
+from app.models.evidence import WorkerEvidenceRecord
 from app.repositories.beneficiaries import BeneficiaryRepository
 from app.repositories.evidence import EvidenceRepository
 from app.services.aggregation_service import (
@@ -226,6 +227,32 @@ def test_reprocessing_the_same_call_is_idempotent(db: Session, engine: CallProof
     first = _process(db, engine, "normal_worker")
     second = _process(db, engine, "normal_worker")
     assert first == second
+    assert len(EvidenceRepository(db).list()) == 1
+
+
+def test_later_call_for_same_worker_is_appended_to_evidence_history(
+    db: Session, engine: CallProofEngine
+) -> None:
+    first = _process(db, engine, "normal_worker")
+    second_call = TeleExpertCall(
+        call_id="later-call",
+        worker_id=first.worker_id,
+        phone_number="+251900000001",
+        prompt="(recorded fixture call)",
+        status="queued",
+    )
+    db.add(second_call)
+    db.commit()
+    process_completed_call(
+        db,
+        second_call.call_id,
+        FIXTURES["normal_worker"]["transcript"],
+        engine=engine,
+    )
+
+    records = db.query(WorkerEvidenceRecord).filter_by(worker_id=first.worker_id).all()
+    assert {record.call_id for record in records} == {first.call_id, "later-call"}
+    # The summary remains one latest-per-worker projection for aggregation.
     assert len(EvidenceRepository(db).list()) == 1
 
 

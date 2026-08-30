@@ -78,10 +78,17 @@ def sync_call_status(db: Session, call_id: str, client: TeleExpertClient | None 
     client = client or TeleExpertClient()
     response = client.get_call(call.call_id)
     values = result_values(response, call)
-    if values["status"] == "completed" and not values["transcript_turns"] and not values["transcript"]:
-        transcript_payload = client.get_transcript(call.call_id)
-        values["transcript_turns"] = transcript_payload.get("turns", [])
-        values["transcript"] = transcript_from_turns(values["transcript_turns"])
+    if values["status"] == "completed" and not values["transcript_turns"]:
+        # Preserve canonical speaker/timing turns even when status returned a
+        # flattened transcript. Keep inline text if this endpoint is delayed.
+        try:
+            transcript_payload = client.get_transcript(call.call_id)
+            values["transcript_turns"] = transcript_payload.get("turns", [])
+            if values["transcript_turns"]:
+                values["transcript"] = transcript_from_turns(values["transcript_turns"])
+        except TeleExpertError:
+            if not values["transcript"]:
+                raise
     if values["audio_url"]:
         values["audio_url"] = client.absolute_url(values["audio_url"])
     if values["status"] == "completed" and call.completed_at is None:
@@ -90,18 +97,21 @@ def sync_call_status(db: Session, call_id: str, client: TeleExpertClient | None 
     # Webhook delivery is the preferred completion path. During local
     # development the webhook may be disabled, so a browser Sync must continue
     # the same pipeline. An already-stored result makes repeated Sync clicks
-    # idempotent and avoids another LLM call.
-    if updated.status == "completed" and updated.transcript and result_missing(db, updated):
-        dispatch_completed_call(
-            db,
-            updated.call_id,
-            {
-                "transcript": updated.transcript,
-                "audio_url": updated.audio_url,
-                "transcript_turns": updated.transcript_turns or [],
-                "language": updated.language,
-            },
-        )
+    # idempotent and avoids another LLM call. For the clause path, compare the
+    # exact call ID; an older worker summary must never block a new call. Batch
+    # calls use their own result store through result_missing().
+    if updated.status == "completed" and updated.transcript:
+        if result_missing(db, updated):
+            dispatch_completed_call(
+                db,
+                updated.call_id,
+                {
+                    "transcript": updated.transcript,
+                    "audio_url": updated.audio_url,
+                    "transcript_turns": updated.transcript_turns or [],
+                    "language": updated.language,
+                },
+            )
     elif updated.status not in ACTIVE_CALL_STATUSES and updated.status != "completed":
         dispatch_failed_call(db, updated.call_id, updated.failure_reason)
     return updated
@@ -122,7 +132,8 @@ def result_missing(db: Session, call: TeleExpertCall) -> bool:
 
     if batch_service.is_batch_call(db, call.call_id):
         return batch_service.batch_result_pending(db, call.call_id)
-    return EvidenceRepository(db).get(call.worker_id) is None
+    latest = EvidenceRepository(db).get(call.worker_id)
+    return latest is None or latest.call_id != call.call_id
 
 
 def cancel_call(db: Session, call_id: str, client: TeleExpertClient | None = None) -> TeleExpertCall:
