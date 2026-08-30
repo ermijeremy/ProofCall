@@ -85,3 +85,41 @@ def _upgrade_legacy_sqlite_schema() -> None:
             for name, definition in columns.items():
                 if name not in existing:
                     connection.execute(text(f'ALTER TABLE "{table_name}" ADD COLUMN "{name}" {definition}'))
+
+        # Company-level thread messages are valid before the first batch exists,
+        # so ``batch_id`` must be nullable.  Older demo databases were created
+        # while every message belonged to a batch; SQLite cannot alter a column's
+        # nullability in place, therefore rebuild this one small table once.
+        message_columns = inspect(engine).get_columns("batch_messages")
+        batch_id = next((column for column in message_columns if column["name"] == "batch_id"), None)
+        if batch_id is not None and not batch_id["nullable"]:
+            connection.execute(text("PRAGMA foreign_keys=OFF"))
+            connection.execute(text("""
+                CREATE TABLE batch_messages_new (
+                    message_id VARCHAR(100) NOT NULL PRIMARY KEY,
+                    company_id VARCHAR(100) NOT NULL DEFAULT '',
+                    batch_id VARCHAR(100),
+                    role VARCHAR(20) NOT NULL,
+                    text TEXT NOT NULL,
+                    payload JSON NOT NULL,
+                    created_at DATETIME NOT NULL,
+                    FOREIGN KEY(batch_id) REFERENCES interview_batches (batch_id)
+                )
+            """))
+            connection.execute(text("""
+                INSERT INTO batch_messages_new
+                    (message_id, company_id, batch_id, role, text, payload, created_at)
+                SELECT message_id, company_id, batch_id, role, text, payload, created_at
+                FROM batch_messages
+            """))
+            connection.execute(text("DROP TABLE batch_messages"))
+            connection.execute(text("ALTER TABLE batch_messages_new RENAME TO batch_messages"))
+            connection.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_batch_messages_company_id "
+                "ON batch_messages (company_id)"
+            ))
+            connection.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_batch_messages_batch_id "
+                "ON batch_messages (batch_id)"
+            ))
+            connection.execute(text("PRAGMA foreign_keys=ON"))

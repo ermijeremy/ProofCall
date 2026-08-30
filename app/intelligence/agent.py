@@ -226,6 +226,9 @@ NUMBERS
 Every count you are given has been computed from stored answers. Quote them.
 Never add up, estimate, or infer a figure of your own, and never state a count
 that is not in the context block.
+In the round context, 'returned' means completed interviews with answers. A
+'failed' call is not a returned answer and must never be described as one. If
+'returned' is zero, say that no interview answer has come back yet.
 
 PEOPLE
 The context block lists every employee with a worker_id. To telephone named

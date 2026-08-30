@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
@@ -12,6 +13,13 @@ from app.services.aggregation_service import aggregate_company, aggregate_progra
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 templates = Jinja2Templates(directory="app/dashboard/templates")
+
+
+@router.get("", include_in_schema=False)
+def dashboard_home():
+    """Keep the old dashboard URL compatible with the new root chat UI."""
+
+    return RedirectResponse(url="/", status_code=307)
 
 
 @router.get("/overview")

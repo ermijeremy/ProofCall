@@ -57,6 +57,25 @@
   </div>
   {% endfor %}
 </div>
+
+<div class="modal-backdrop" id="company-modal" hidden>
+  <section class="company-modal" role="dialog" aria-modal="true" aria-labelledby="company-modal-title">
+    <button class="modal-close" id="company-modal-close" type="button" aria-label="Close">×</button>
+    <div class="modal-icon">+</div>
+    <p class="eyebrow">New workspace</p>
+    <h2 id="company-modal-title">Add a company</h2>
+    <p class="muted modal-copy">Create a private conversation where you can upload employees and run interview rounds.</p>
+    <form id="company-form">
+      <label class="field-label" for="company-name">Company name</label>
+      <input class="text-input" id="company-name" name="name" type="text" maxlength="255" autocomplete="organization" placeholder="e.g. Addis Retail Group" required>
+      <p class="form-error" id="company-error" role="alert" hidden></p>
+      <div class="modal-actions">
+        <button class="ghost-button" id="company-cancel" type="button">Cancel</button>
+        <button class="primary-button" id="company-submit" type="submit">Create company</button>
+      </div>
+    </form>
+  </section>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -87,30 +106,62 @@
     element.textContent = ago(element.dataset.time);
   }
 
-  async function addCompany(button) {
-    const name = window.prompt("Company name");
-    if (name === null) return;
-    button.disabled = true;
+  const modal = document.getElementById("company-modal");
+  const form = document.getElementById("company-form");
+  const nameInput = document.getElementById("company-name");
+  const errorBox = document.getElementById("company-error");
+  const submitButton = document.getElementById("company-submit");
+
+  function closeModal() {
+    modal.hidden = true;
+    form.reset();
+    errorBox.hidden = true;
+    errorBox.textContent = "";
+  }
+
+  function openModal() {
+    modal.hidden = false;
+    window.requestAnimationFrame(() => nameInput.focus());
+  }
+
+  async function addCompany(event) {
+    event.preventDefault();
+    const name = nameInput.value.trim();
+    if (!name) {
+      errorBox.textContent = "Enter a company name to continue.";
+      errorBox.hidden = false;
+      nameInput.focus();
+      return;
+    }
+    submitButton.disabled = true;
+    errorBox.hidden = true;
     try {
       const response = await fetch("/api/companies", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({name: name.trim() || null}),
+        body: JSON.stringify({name}),
       });
-      const body = await response.json();
+      const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.detail || "Could not add the company");
       // Straight into the thread: the next thing to do is upload the people, and
       // that only happens inside the conversation.
       window.location.href = `/c/${body.company_id}`;
     } catch (error) {
-      window.alert(error.message);
-      button.disabled = false;
+      errorBox.textContent = error.message;
+      errorBox.hidden = false;
+      submitButton.disabled = false;
+      nameInput.focus();
     }
   }
 
   for (const id of ["new-company", "new-company-empty"]) {
     const button = document.getElementById(id);
-    if (button) button.addEventListener("click", () => addCompany(button));
+    if (button) button.addEventListener("click", openModal);
   }
+  form.addEventListener("submit", addCompany);
+  document.getElementById("company-cancel").addEventListener("click", closeModal);
+  document.getElementById("company-modal-close").addEventListener("click", closeModal);
+  modal.addEventListener("click", (event) => { if (event.target === modal) closeModal(); });
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !modal.hidden) closeModal(); });
 </script>
 {% endblock %}

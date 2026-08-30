@@ -32,6 +32,10 @@ class InterviewBatch(Base):
     questions: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, nullable=False)
     #: Pass-two output: ``{slug: {"categories": [...], "assignments": {...}}}``.
     categories: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    #: Compatibility field for databases created by the previous round-scoped
+    #: design. New code does not read it; the empty default lets those existing
+    #: schemas accept company-scoped batches while they are gradually replaced.
+    roster_worker_ids: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     language: Mapped[str] = mapped_column(String(20), default="am", nullable=False)
     #: draft -> ready -> selected -> (scheduled) -> calling -> complete
     status: Mapped[str] = mapped_column(String(30), default="draft", nullable=False, index=True)

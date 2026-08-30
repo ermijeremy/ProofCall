@@ -262,6 +262,69 @@ body { -webkit-font-smoothing: antialiased; }
   text-align: center;
 }
 
+/* -- company creation modal --------------------------------------------- */
+
+.modal-backdrop[hidden] { display: none; }
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(18, 29, 48, .42);
+  backdrop-filter: blur(5px);
+}
+
+.company-modal {
+  position: relative;
+  width: min(100%, 440px);
+  padding: 32px;
+  border: 1px solid rgba(255, 255, 255, .7);
+  border-radius: 22px;
+  background: var(--paper);
+  box-shadow: 0 24px 70px rgba(18, 29, 48, .24);
+  animation: modal-in .18s ease-out;
+}
+
+@keyframes modal-in {
+  from { opacity: 0; transform: translateY(8px) scale(.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.modal-close {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 50%;
+  background: #f1f4f8;
+  color: var(--muted);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.modal-close:hover { background: var(--teal-soft); color: var(--teal); }
+.modal-icon { display: grid; place-items: center; width: 42px; height: 42px; margin-bottom: 20px; border-radius: 13px; background: var(--teal-soft); color: var(--teal); font-size: 25px; }
+.eyebrow { margin: 0 0 6px; color: var(--teal); font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+.company-modal h2 { margin: 0; font: 700 25px 'Space Grotesk', sans-serif; letter-spacing: -.03em; }
+.modal-copy { margin: 8px 0 24px; font-size: 13px; line-height: 1.55; }
+.field-label { display: block; margin-bottom: 7px; color: var(--ink); font-size: 12px; font-weight: 700; }
+.text-input { box-sizing: border-box; width: 100%; padding: 12px 13px; border: 1px solid #d7e0ec; border-radius: 10px; outline: 0; background: #fbfcfe; color: var(--ink); font: 14px 'DM Sans', sans-serif; transition: border-color .15s, box-shadow .15s; }
+.text-input:focus { border-color: var(--teal); box-shadow: var(--ring); background: #fff; }
+.form-error { margin: 8px 0 0; color: #b42318; font-size: 12px; line-height: 1.4; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }
+
+@media (max-width: 520px) {
+  .company-modal { padding: 26px 20px 22px; }
+  .modal-actions { flex-direction: column-reverse; }
+  .modal-actions button { width: 100%; }
+}
+
 .empty h2 { margin: 0 0 8px; font: 700 20px 'Space Grotesk', sans-serif; letter-spacing: -.02em; }
 .empty p { margin: 0 auto 20px; max-width: 46ch; color: var(--muted); font-size: 14px; line-height: 1.6; }
 
