@@ -1,12 +1,15 @@
 """TeleExpert response normalization and webhook event processing."""
 
 import logging
-from datetime import datetime
+import re
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.db.session import SessionLocal
 from app.integrations.teleexpert_client import TeleExpertClient, TeleExpertError
 from app.models.call import TeleExpertCall
@@ -29,6 +32,25 @@ def transcript_from_turns(turns: list[dict[str, Any]]) -> str:
         for turn in turns
         if isinstance(turn, dict) and turn.get("text")
     )
+
+
+def download_audio_artifact(client: TeleExpertClient, call_id: str) -> Path:
+    """Fetch completed-call audio once and store it outside the database."""
+
+    audio = client.get_audio(call_id)
+    if not audio:
+        raise ValueError(f"TeleExpert returned empty audio for call {call_id}")
+    safe_call_id = re.sub(r"[^A-Za-z0-9_.-]", "_", call_id)
+    directory = Path(settings.callwise_audio_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    existing = sorted(directory.glob(f"{safe_call_id}_*.wav"))
+    path = existing[0] if existing else directory / (
+        f"{safe_call_id}_{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.wav"
+    )
+    if not path.exists() or path.stat().st_size == 0:
+        path.write_bytes(audio)
+    logger.info("TeleExpert audio saved call_id=%s path=%s bytes=%s", call_id, path, len(audio))
+    return path
 
 
 def _transcript_metadata(payload: dict[str, Any], call: TeleExpertCall) -> tuple[str | None, list[dict[str, Any]], str | None]:
@@ -169,6 +191,15 @@ def process_webhook_event(event_id: str) -> None:
                 if not values["transcript"]:
                     raise ValueError("Completed TeleExpert call did not include a transcript")
                 dispatch_completed_call(db, updated.call_id, values)
+                # Audio is intentionally fetched after extraction. If consent
+                # was declined/voided, the batch pipeline has already removed
+                # transcript/media references and no audio is retained.
+                from app.repositories.batches import WorkerAnswerRecordRepository
+                completed_record = WorkerAnswerRecordRepository(db).by_call(updated.call_id)
+                if completed_record is not None and completed_record.consent:
+                    audio_path = download_audio_artifact(client, updated.call_id)
+                    from app.services import batch_service
+                    batch_service.attach_local_audio_artifact(updated.call_id, audio_path)
             elif updated.status not in ACTIVE_CALL_STATUSES:
                 dispatch_failed_call(db, updated.call_id, values["failure_reason"])
             event.status = "processed"

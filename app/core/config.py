@@ -33,6 +33,16 @@ class Settings(BaseModel):
     callwise_response_dir: str = Field(
         default_factory=lambda: os.getenv("CALLWISE_RESPONSE_DIR", "data/callwise_responses")
     )
+    callwise_audio_dir: str = Field(
+        default_factory=lambda: os.getenv("CALLWISE_AUDIO_DIR", "data/callwise_audio")
+    )
+    callwise_test_worker_ids: set[str] = Field(
+        default_factory=lambda: {
+            item.strip()
+            for item in os.getenv("CALLWISE_TEST_WORKER_IDS", "").split(",")
+            if item.strip()
+        }
+    )
 
 
 settings = Settings()

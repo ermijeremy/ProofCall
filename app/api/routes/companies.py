@@ -184,4 +184,11 @@ def dial_round(company_id: str, data: RoundDial, db: Session = Depends(get_db)) 
         raise HTTPException(status_code=400, detail="Review and select workers first")
     BatchRepository(db).update(batch, {"retries": data.retries})
     result = dial_selection(db, batch, build_batch_intelligence())
+    if not result["dialed"]:
+        # ``dial_selection`` preserves the selection after a provider/network
+        # failure so the admin can retry. Do not report that operation as HTTP
+        # success: a 200 here made the UI say a call was placed when TeleExpert
+        # was unreachable.
+        reason = ", ".join(result.get("failed") or []) or "TeleExpert did not accept the call"
+        raise HTTPException(status_code=502, detail=f"No call was placed: {reason}")
     return {"thread": company_thread(db, company_id), "result": result}

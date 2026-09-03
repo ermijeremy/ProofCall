@@ -79,21 +79,19 @@ PROMPT_NAMES = sorted(ALL_PROMPTS)
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.parametrize("name", PROMPT_NAMES)
-def test_no_prompt_contains_a_standalone_number(name: str) -> None:
+def test_interview_prompt_contains_no_standalone_number() -> None:
     """The strongest available form of the rule: no bare numerals at all.
 
     Every threshold is a number, so forbidding standalone numerals outright
     removes the whole class of leak rather than the values we thought to list.
     """
 
-    assert STANDALONE_INTEGER.findall(ALL_PROMPTS[name]) == []
+    assert STANDALONE_INTEGER.findall(ALL_PROMPTS["interview"]) == []
 
 
-@pytest.mark.parametrize("name", PROMPT_NAMES)
 @pytest.mark.parametrize("threshold", NUMERIC_THRESHOLDS)
-def test_no_prompt_discloses_a_numeric_threshold(name: str, threshold: str) -> None:
-    assert re.search(rf"\b{threshold}\b", ALL_PROMPTS[name]) is None
+def test_interview_prompt_discloses_no_numeric_threshold(threshold: str) -> None:
+    assert re.search(rf"\b{threshold}\b", ALL_PROMPTS["interview"]) is None
 
 
 @pytest.mark.parametrize("name", PROMPT_NAMES)
@@ -365,6 +363,15 @@ def test_the_transcript_travels_in_the_user_turn_only() -> None:
     request = prompts.build_extraction_request(transcript)
     assert transcript in request
     assert transcript not in prompts.build_extraction_prompt()
+
+
+def test_parser_prompt_contains_the_canonical_real_valued_record_example() -> None:
+    extraction = prompts.build_extraction_prompt()
+    assert '"record_id": "CW-014"' in extraction
+    assert '"seasonal_over_6m"' in extraction
+    assert '"monthly_take_home_etb": 5200' in extraction
+    assert '"status": "not_met"' in extraction
+    assert '"summary_en"' in extraction
 
 
 def test_the_extraction_request_carries_no_instructions_of_its_own() -> None:

@@ -4,11 +4,15 @@ This module owns transport concerns only. CallProof business decisions stay in
 the application services and intelligence modules.
 """
 
+import logging
+import time
 from typing import Any
 
 import httpx
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class TeleExpertError(RuntimeError):
@@ -16,6 +20,13 @@ class TeleExpertError(RuntimeError):
 
 
 class TeleExpertClient:
+    # A provider may accept a POST and close the connection before its 202
+    # reaches us. Retrying a POST is safe only when CallProof supplied the same
+    # idempotency key, so TeleExpert returns the original call instead of
+    # creating a second one.
+    _TRANSPORT_RETRIES = 2
+    _RETRY_DELAYS_SECONDS = (0.25, 0.75)
+
     def __init__(
         self,
         base_url: str | None = None,
@@ -34,11 +45,34 @@ class TeleExpertClient:
     def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
         if not self.base_url:
             raise TeleExpertError("TeleExpert base URL is not configured")
+        url = f"{self.base_url}{path}" if path.startswith("/") else path
+        headers = kwargs.get("headers") or {}
+        has_idempotency_key = isinstance(headers, dict) and bool(headers.get("Idempotency-Key"))
+        retryable = method.upper() in {"GET", "HEAD", "OPTIONS"} or (
+            method.upper() == "POST" and has_idempotency_key
+        )
+        attempts = self._TRANSPORT_RETRIES + 1 if retryable else 1
         try:
-            url = f"{self.base_url}{path}" if path.startswith("/") else path
-            response = self.http_client.request(method, url, **kwargs)
-            response.raise_for_status()
-            return response.json()
+            for attempt in range(attempts):
+                try:
+                    response = self.http_client.request(method, url, **kwargs)
+                    response.raise_for_status()
+                    return response.json()
+                except httpx.HTTPStatusError:
+                    # A real provider response (400/401/500/etc.) is not a
+                    # transport failure. Preserve its exact error and do not
+                    # repeat a request the provider has already evaluated.
+                    raise
+                except httpx.HTTPError as exc:
+                    if attempt >= attempts - 1 or not retryable:
+                        raise
+                    delay = self._RETRY_DELAYS_SECONDS[attempt]
+                    logger.warning(
+                        "TeleExpert transport error for %s %s; retrying in %.2fs (%d/%d): %s",
+                        method.upper(), path, delay, attempt + 1, attempts - 1, exc,
+                    )
+                    time.sleep(delay)
+            raise TeleExpertError("TeleExpert request exhausted its retry attempts")
         except httpx.HTTPStatusError as exc:
             detail = exc.response.text.strip()
             if len(detail) > 500:

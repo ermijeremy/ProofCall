@@ -96,6 +96,32 @@ def test_worker_language_beats_the_batch_default():
     assert "Swahili" not in prompt
 
 
+def test_language_choice_is_required_before_consent_or_questions():
+    prompt = questions_module.build_interview_prompt(
+        {"worker_id": "w1", "preferred_language": "am"},
+        questions_module.fixed_question_set(),
+    )
+    language = prompt.index("LANGUAGE CHECK")
+    consent = prompt.index("SPOKEN CONSENT")
+    age = prompt.index("FIRST SUBSTANTIVE QUESTION")
+
+    assert language < consent < age
+    assert "Do not continue until the respondent clearly chooses Amharic or English" in prompt
+    assert "If they are silent, say the exact language-choice sentence again and wait" in prompt
+    assert "it is never a fallback for an unanswered choice" in prompt
+    assert "mark language selection as unresolved" in prompt
+
+
+def test_interview_prompt_does_not_add_questions_or_switch_language_at_closing():
+    prompt = questions_module.build_interview_prompt(
+        {"worker_id": "w1", "preferred_language": "am"},
+        questions_module.fixed_question_set(),
+    )
+    assert "do not add follow-up questions" in prompt
+    assert "the fixed list in order" in prompt
+    assert "closing in the selected\nlanguage" in prompt
+
+
 def test_batch_language_is_used_when_the_worker_has_none():
     prompt = questions_module.build_interview_prompt(
         {"worker_id": "w1", "preferred_language": ""},
@@ -115,6 +141,20 @@ def test_extraction_prompt_names_every_question_and_asks_only_for_an_age_label()
     assert "MET" not in prompt
     assert "verdict" in prompt  # only ever as a prohibition
     assert "Do not output a verdict" in prompt
+
+
+def test_record_example_is_parser_documentation_not_voice_instruction():
+    question_set = questions_module.fixed_question_set()
+    interview = questions_module.build_interview_prompt({"worker_id": "worker"}, question_set)
+    extraction = questions_module.build_extraction_prompt(question_set)
+
+    assert '"record_id": "CW-014"' not in interview
+    assert '"record_id": "CW-014"' in extraction
+    assert '"monthly_take_home_etb": 5200' in extraction
+    assert '"seasonal_over_6m"' in extraction
+    assert "6. Output record per call" in extraction
+    assert "beneficiary_id resolves to a person only inside beSingularity." in extraction
+    assert "do not copy" in extraction
 
 
 def test_normalize_extraction_fills_every_question_even_when_the_model_skips_some():
@@ -167,3 +207,51 @@ def test_a_stopped_interview_marks_the_rest_not_asked_rather_than_vague():
     )
     states = {entry["state"] for entry in extraction["answers"].values()}
     assert states == {"NOT_ASKED"}
+
+
+def test_normalize_extraction_closes_confidence_language_and_non_stated_values():
+    question_set = questions_module.build_question_set(["What is your salary?"])
+    extraction = questions_module.normalize_extraction(
+        {
+            "consent": True,
+            "language": "am-ET",
+            "answers": {
+                "age_years": {
+                    "value": "21",
+                    "state": "STATED",
+                    "confidence": "made-up",
+                    "evidence": "  21  ",
+                },
+                "what_is_your_salary": {
+                    "value": "5000",
+                    "state": "REFUSED",
+                    "evidence": "I would rather not say",
+                },
+            },
+        },
+        worker_id="w1",
+        transcript="caller: 21",
+        questions=question_set,
+    )
+    assert extraction["language"] == "am"
+    assert extraction["answers"]["age_years"]["confidence"] == "LOW"
+    assert extraction["answers"]["age_years"]["evidence"] == "21"
+    assert extraction["answers"]["what_is_your_salary"]["value"] is None
+
+
+def test_normalize_extraction_voided_consent_removes_all_answer_content():
+    question_set = questions_module.build_question_set(["What is your salary?"])
+    extraction = questions_module.normalize_extraction(
+        {
+            "consent": True,
+            "consent_details": {"state": "voided", "name": True},
+            "answers": {"age_years": {"value": "21", "state": "STATED", "evidence": "21"}},
+        },
+        worker_id="w1",
+        transcript="caller: do not record this",
+        questions=question_set,
+    )
+    assert extraction["consent"] is False
+    assert extraction["stop_reason"] == "NO_CONSENT"
+    assert all(answer["state"] == "NOT_ASKED" for answer in extraction["answers"].values())
+    assert all(answer["value"] is None and answer["evidence"] is None for answer in extraction["answers"].values())

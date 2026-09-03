@@ -152,6 +152,7 @@ def _persist_call_response(
         "transcript": transcript,
         "transcript_turns": transcript_turns,
         "audio_url": audio_url,
+        "local_audio_path": None,
         "privacy_redacted": not extraction.get("consent", False),
         "extraction": extraction,
         "good_job_annotation": annotation,
@@ -165,6 +166,22 @@ def _persist_call_response(
     }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
     logger.info("Callwise response JSON saved call_id=%s path=%s", call_id, path)
+    return path
+
+
+def attach_local_audio_artifact(call_id: str, audio_path: Path) -> Path | None:
+    """Record the downloaded audio beside the existing immutable call JSON."""
+
+    safe_call_id = re.sub(r"[^A-Za-z0-9_.-]", "_", call_id)
+    directory = Path(settings.callwise_response_dir)
+    artifacts = sorted(directory.glob(f"{safe_call_id}_*.json"))
+    if not artifacts:
+        logger.warning("Cannot attach local audio; response JSON is missing call_id=%s", call_id)
+        return None
+    path = artifacts[0]
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["local_audio_path"] = str(audio_path)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
     return path
 
 
@@ -546,6 +563,12 @@ def roster(db: Session, company_id: str | InterviewBatch, batch: InterviewBatch 
             continue
         record = answers.get(person.worker_id)
         target = targets.get(person.worker_id)
+        historically_excluded = bool(record.excluded) if record else False
+        # A controlled local validation override lets the team reuse a single
+        # test contact after an old fixture was incorrectly classified. It is
+        # opt-in by worker ID and does not disable safeguarding for any new
+        # interview result or for production workers.
+        excluded = historically_excluded and person.worker_id not in settings.callwise_test_worker_ids
         people.append(
             {
                 "worker_id": person.worker_id,
@@ -562,7 +585,7 @@ def roster(db: Session, company_id: str | InterviewBatch, batch: InterviewBatch 
                 "call_id": target.call_id if target else None,
                 "ever_called": person.worker_id in reached,
                 "answered": record is not None,
-                "excluded": bool(record.excluded) if record else False,
+                "excluded": excluded,
                 "exclusion_reason": record.exclusion_reason if record else None,
             }
         )
@@ -979,7 +1002,7 @@ def _disposition_for(extraction: dict[str, Any]) -> str:
         return "stopped" if extraction.get("interview_stopped") else "excluded"
     answers = extraction.get("answers") or {}
     states = [item.get("state") for item in answers.values() if isinstance(item, dict)]
-    if extraction.get("interview_stopped") or ("STATED" in states and "NOT_ASKED" in states):
+    if extraction.get("interview_stopped") or "NOT_ASKED" in states:
         return "partial"
     return "completed"
 
@@ -1861,6 +1884,7 @@ __all__ = [
     "TERMINAL_TARGET_STATUSES",
     "WAITING_ON",
     "already_called",
+    "attach_local_audio_artifact",
     "batch_summary",
     "batch_result_pending",
     "batch_detail",

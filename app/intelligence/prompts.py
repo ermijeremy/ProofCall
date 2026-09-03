@@ -56,6 +56,39 @@ FACT_SCHEMA: tuple[tuple[str, str], ...] = (
     ("freedom_of_association_restricted", "true if they are prevented from joining a workers' association"),
 )
 
+# Canonical downstream shape for the extractor to understand. This is a
+# concrete example from the Callwise specification; it is shown only in the
+# parsing prompt, never in the voice-interviewer prompt.
+CALLWISE_OUTPUT_RECORD_EXAMPLE = r'''{
+  "record_id": "CW-014",
+  "beneficiary_id": "BSG-2026-0143",
+  "training_cohort_id": "COH-2026-04",
+  "language": "am",
+  "channel": "voice",
+  "interview_date": "2026-09-18",
+  "call": {"attempts": 2, "disposition": "completed", "duration_seconds": 331, "language_switched": false, "cost_usd": 0.28},
+  "consent": {"state": "granted_no_name", "name": false, "quote": true, "voice": false, "photo": false, "voided_at_turn": null, "vulnerable_group_script": false},
+  "employment": {"status": "working", "type": "employee", "sales_related": true, "employer_name": null, "start_date": "2026-04-01", "months_since_start": 5, "hours_per_week": 44, "weeks_per_year": 52, "monthly_take_home_etb": 5200, "deductions_reported": "transport, 300 birr", "continuous": true},
+  "clauses": {
+    "age_ok": {"status": "met", "confidence": 0.9, "evidence_turn": 4, "source": "worker"},
+    "hours_ok": {"status": "met", "confidence": 0.8, "evidence_turn": 12, "source": "worker"},
+    "tenure_ok": {"status": "met", "confidence": 0.75, "evidence_turn": 10, "source": "worker"},
+    "wage_ok": {"status": "met", "confidence": 0.7, "evidence_turn": 14, "source": "worker"},
+    "no_child_labour": {"status": "met", "confidence": 0.9, "evidence_turn": 4, "source": "worker"},
+    "no_forced_labour": {"status": "met", "confidence": 0.8, "evidence_turn": 16, "source": "worker"},
+    "no_discrimination": {"status": "unclear", "confidence": 0.3, "evidence_turn": null, "source": "none"},
+    "association_ok": {"status": "not_met", "confidence": 0.7, "evidence_turn": 18, "source": "worker"},
+    "seasonal_over_6m": {"status": "met", "confidence": 0.6, "evidence_turn": 10, "source": "worker"}
+  },
+  "counted": false,
+  "unresolved_clause_count": 1,
+  "training": {"months_to_first_placement": 2, "training_helped_placement": "a_lot", "satisfaction_1_5": 4, "skills_used": "handling a customer who says no", "other_changes": "pays her own rent since June"},
+  "aggregation_key": {"age_band": "25+", "gender": "F"},
+  "quotes": [{"lang": "am", "text": "..."}],
+  "summary_en": "Employed in a shop since April 2026, sales role, 44 hours a week, 5,200 birr take-home after a transport deduction. No worker representation. Credits the training with the placement.",
+  "flags": ["small_cell_risk"]
+}'''
+
 
 def _worker_field(worker: Any, field: str, default: Any = None) -> Any:
     if worker is None:
@@ -250,6 +283,14 @@ made elsewhere.
 Do not output MET, NOT_MET, a verdict, or any recommendation.
 Set "interview_stopped" to true only when the interviewer ended the call early,
 and give the reason as a code such as "UNDER_MINIMUM_AGE" or "NO_CONSENT".
+
+REFERENCE RECORD SHAPE
+The following is the downstream Callwise output shape. It documents field
+names and nesting only. Do not copy its values, do not invent values from it,
+and do not calculate clauses or counted; application code does that after
+validation:
+
+{CALLWISE_OUTPUT_RECORD_EXAMPLE}
 """
 
 
