@@ -1,8 +1,5 @@
 """Dashboard page and aggregate-data endpoints."""
 
-import json
-from pathlib import Path
-
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
@@ -44,17 +41,6 @@ def programme_page(request: Request, db: Session = Depends(get_db)):
         request=request,
         name="overview.html",
         context={"summary": aggregate_programme(db)},
-    )
-
-
-@router.get("/setup", include_in_schema=False)
-def setup_page(request: Request):
-    demo_path = Path(__file__).resolve().parents[3] / "data" / "demo_workers.json"
-    demo_workers = json.loads(demo_path.read_text(encoding="utf-8")) if demo_path.exists() else []
-    return templates.TemplateResponse(
-        request=request,
-        name="setup.html",
-        context={"demo_workers": demo_workers},
     )
 
 

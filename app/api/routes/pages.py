@@ -12,10 +12,19 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.intelligence.questions import fixed_question_set
 from app.services.batch_service import company_listing, company_thread
 
 router = APIRouter(include_in_schema=False)
 templates = Jinja2Templates(directory="app/dashboard/templates")
+
+# Registered as a global rather than passed per route. The questionnaire is a
+# versioned constant, so there is one correct value and no request can change it,
+# and a template variable that every route has to remember to pass is a variable a
+# route will eventually forget: Jinja's default Undefined renders a missing name as
+# nothing at all, so forgetting it produced an empty questionnaire panel and a
+# "0 questions" badge instead of an error anybody would notice.
+templates.env.globals["questions"] = fixed_question_set()
 
 
 @router.get("/")
@@ -45,6 +54,9 @@ def thread(request: Request, company_id: str, db: Session = Depends(get_db)):
         if str(exc).startswith("No such company:"):
             return RedirectResponse(url="/", status_code=303)
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    # `questions` comes from the template globals above: the panel does not depend
+    # on a round existing yet, which is what used to keep it empty until a CSV
+    # upload created one.
     return templates.TemplateResponse(
         request=request,
         name="round.html",
