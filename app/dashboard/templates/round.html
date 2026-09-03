@@ -99,11 +99,30 @@ function paint(){roster();const r=state.round||{};const status=state.status||'dr
 const STEPS=['setup','select','confirm','results'];
 const STEP_AT={draft:0,ready:1,selected:2,calling:3,complete:3};
 function stepper(status){const at=STEP_AT[status]??0;const finished=status==='complete';document.querySelectorAll('.wizard-step').forEach(el=>{const i=STEPS.indexOf(el.dataset.step);el.classList.toggle('active',i===at&&!finished);el.classList.toggle('done',finished||i<at);});document.querySelectorAll('.wizard-line').forEach((el,i)=>el.classList.toggle('done',finished||i<at));}
-async function refresh(){const r=await fetch(`/api/companies/${encodeURIComponent(COMPANY_ID)}`);if(r.ok){state=await r.json();paint();}}
+// Polling runs unattended for minutes, so the failure to expect here is a dropped
+// connection, not a malformed body -- `if(r.ok)` already kept a 500's plain-text
+// body away from the parse. The hazard was that a rejected fetch had no caller to
+// catch it: the interval kept firing, nothing surfaced, and the page sat on stale
+// state under a spinner that would never resolve. One blip mid-round is not worth
+// alarming anybody over, so tolerate a couple, then say so plainly.
+let missed=0;
+async function refresh({loud=false}={}){
+  try{
+    const r=await fetch(`/api/companies/${encodeURIComponent(COMPANY_ID)}`);
+    const body=await payloadOf(r);
+    if(!r.ok)throw Error(body.detail||`Server error (${r.status}).`);
+    const recovered=missed>=3;missed=0;state=body;paint();
+    if(recovered)notify('Live updates resumed.');
+  }catch(e){
+    missed+=1;
+    if(loud)notify(e.message,true);
+    else if(missed===3)notify(`Live updates stopped: ${e.message} The round is still running — reload to catch up.`,true);
+  }
+}
 async function action(path, payload={}){if(busy)return;busy=true;notify('Working…');try{const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const b=await payloadOf(r);if(!r.ok)throw Error(b.detail||'Action failed');state=b.thread;paint();$('notice').hidden=true;}catch(e){notify(e.message,true);}finally{busy=false;}}
 async function upload(file){const data=new FormData();data.append('file',file);busy=true;notify('Importing roster…');try{const r=await fetch(`/api/companies/${encodeURIComponent(COMPANY_ID)}/upload`,{method:'POST',body:data});const b=await payloadOf(r);if(!r.ok)throw Error(b.detail||'Upload failed');state=b.thread;paint();notify('Roster imported. Review the fixed questionnaire, then select workers.');}catch(e){notify(e.message,true);}finally{busy=false;}}
 async function recall(workerId){if(busy)return;busy=true;notify('Creating a new call…');try{let r=await fetch(`/api/companies/${encodeURIComponent(COMPANY_ID)}/rounds/select`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({worker_ids:[workerId]})});let b=await payloadOf(r);if(!r.ok)throw Error(b.detail||'Could not select worker');state=b.thread;paint();r=await fetch(`/api/companies/${encodeURIComponent(COMPANY_ID)}/rounds/dial`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({retries:1})});b=await payloadOf(r);if(!r.ok)throw Error(b.detail||'Could not place call');state=b.thread;paint();notify((b.result?.dialed||[]).length?'New call placed successfully.':'The new call could not be placed.',!(b.result?.dialed||[]).length);}catch(e){notify(e.message,true);}finally{busy=false;}}
-$('csv-file').onchange=e=>e.target.files[0]&&upload(e.target.files[0]);$('change-selection').onclick=()=>refresh();$('review-selection').onclick=()=>{const ids=chosen().map(x=>x.dataset.worker);if(!ids.length)return notify('Select at least one available worker.',true);action(`/api/companies/${encodeURIComponent(COMPANY_ID)}/rounds/select`,{worker_ids:ids});};
+$('csv-file').onchange=e=>e.target.files[0]&&upload(e.target.files[0]);$('change-selection').onclick=()=>refresh({loud:true});$('review-selection').onclick=()=>{const ids=chosen().map(x=>x.dataset.worker);if(!ids.length)return notify('Select at least one available worker.',true);action(`/api/companies/${encodeURIComponent(COMPANY_ID)}/rounds/select`,{worker_ids:ids});};
 $('select-all').onclick=()=>setAll(true);$('clear-selection').onclick=()=>setAll(false);$('select-random').onclick=()=>pickRandom();$('random-size').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();pickRandom();}};
 $('confirm-calls').onclick=()=>{const n=Math.max(0,Math.min(5,Number($('retries').value)||0));action(`/api/companies/${encodeURIComponent(COMPANY_ID)}/rounds/dial`,{retries:n});};
 document.addEventListener('click',e=>{const button=e.target.closest('[data-recall]');if(button){e.preventDefault();e.stopPropagation();recall(button.dataset.recall);}});

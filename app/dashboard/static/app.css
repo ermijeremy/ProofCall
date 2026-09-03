@@ -119,8 +119,6 @@ body { -webkit-font-smoothing: antialiased; background-image: radial-gradient(ci
 .turn-agent .bubble time, .turn-admin .bubble time { opacity: .78; }
 .attachment .card { box-shadow: 0 1px 2px rgba(23,32,51,.025); }
 .card-actions { margin-top: 9px; }
-.protocol-ready { display: flex; align-items: center; gap: 8px; margin: 16px 0 0; padding: 10px 12px; border: 1px solid #bfe5e1; border-radius: 10px; color: #126a65; background: #effbf9; font-size: 12px; font-weight: 600; }
-.protocol-ready span { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; color: #fff; background: var(--teal); font-size: 11px; }
 .field { margin-bottom: 8px; }
 .field span { margin-bottom: 4px; }
 .field input { padding: 8px 10px; }
