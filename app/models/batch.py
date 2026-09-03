@@ -124,6 +124,11 @@ class WorkerAnswers(Base):
     attempts: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     good_job_annotation: Mapped[str] = mapped_column(String(30), default="UNCLEAR", nullable=False)
     kpi_clauses: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    #: The section-6 Callwise record for this call: nine clauses with the turn each
+    #: rests on, the employment and training blocks, and the model's summary. Built
+    #: once, when the interview is parsed, because it cites turn numbers in a
+    #: transcript that a declined call deletes.
+    callwise_record: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     #: Set by code from a model-supplied label. An excluded record is counted nowhere.
     excluded: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     exclusion_reason: Mapped[Any] = mapped_column(Text, nullable=True)
@@ -155,6 +160,8 @@ class WorkerAnswerRecord(Base):
     attempts: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     good_job_annotation: Mapped[str] = mapped_column(String(30), default="UNCLEAR", nullable=False)
     kpi_clauses: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    #: The section-6 Callwise record for this call, as built when it was parsed.
+    callwise_record: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     excluded: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     exclusion_reason: Mapped[Any] = mapped_column(Text, nullable=True)
     consent_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)

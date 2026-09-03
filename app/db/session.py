@@ -109,6 +109,7 @@ def _upgrade_legacy_sqlite_schema() -> None:
             "good_job_annotation": "VARCHAR(30) NOT NULL DEFAULT 'UNCLEAR'",
             "kpi_clauses": "JSON NOT NULL DEFAULT '{}'",
             "consent_json": "JSON NOT NULL DEFAULT '{}'",
+            "callwise_record": "JSON NOT NULL DEFAULT '{}'",
         },
         "worker_answer_records": {
             "transcript_turns": "JSON",
@@ -118,6 +119,7 @@ def _upgrade_legacy_sqlite_schema() -> None:
             "good_job_annotation": "VARCHAR(30) NOT NULL DEFAULT 'UNCLEAR'",
             "kpi_clauses": "JSON NOT NULL DEFAULT '{}'",
             "consent_json": "JSON NOT NULL DEFAULT '{}'",
+            "callwise_record": "JSON NOT NULL DEFAULT '{}'",
         },
         "batch_targets": {
             "attempts": "INTEGER NOT NULL DEFAULT 0",

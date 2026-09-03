@@ -33,7 +33,7 @@ from typing import Any, Callable
 from uuid import uuid4
 
 from sqlalchemy.orm import Session
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.core.config import settings
@@ -42,6 +42,7 @@ from app.intelligence import agent, analysis, categorize as categorize_module, q
 from app.intelligence.batch_engine import BatchIntelligence, build_batch_intelligence
 from app.intelligence.providers.base import ProviderError
 from app.models.batch import BatchMessage, BatchTarget, CallAttempt, InterviewBatch, WorkerAnswerRecord, WorkerAnswers
+from app.models.beneficiary import Beneficiary
 from app.models.employer import Employer
 from app.repositories.batches import (
     BatchMessageRepository,
@@ -110,6 +111,82 @@ def _good_job_annotation(extraction: dict[str, Any], company: Employer | None = 
                       safeguarding=bool(extraction.get("safeguarding_flag")),
                       minimum_wage_etb=getattr(company, "minimum_wage_etb", None))
     return result["overall_verdict"], result["clauses"]
+
+
+def _cohort_size(db: Session, training_cohort_id: str | None) -> int | None:
+    """How many people share this training cohort.
+
+    The record flags a small-cell risk from this: a cohort of three cannot be
+    reported on without the three of them being identifiable to each other's
+    employer. Unknown cohort means no count and therefore no flag, which is
+    honest -- an absent number must not read as a safe one.
+    """
+
+    if not training_cohort_id:
+        return None
+    return db.scalar(
+        select(func.count())
+        .select_from(Beneficiary)
+        .where(Beneficiary.training_cohort_id == training_cohort_id)
+    )
+
+
+def _callwise_record(
+    *,
+    call_id: str,
+    extraction: dict[str, Any],
+    annotation: str,
+    kpi_clauses: dict[str, Any],
+    disposition: str,
+    turns: list[dict[str, Any]],
+    provider_language: str | None,
+    audio_url: str | None,
+    person: Any,
+    attempts: int,
+    cohort_size: int | None,
+) -> dict[str, Any]:
+    """Build the section-6 record for one parsed interview.
+
+    Built here, once, at parse time, and stored -- not derived on demand from the
+    stored answers. Two of its fields cannot be reconstructed later: every clause
+    cites the transcript turn it rests on, and a declined or voided call deletes
+    that transcript within the same request. A record assembled after the fact
+    would either lose its citations or force us to keep the recording we promised
+    to delete.
+
+    ``turns`` is the retained turn array, so a withheld call contributes no
+    duration and no citations, which is the same promise seen from this side.
+    """
+
+    from app.intelligence.callwise_record import build_record
+
+    detected = [code for code in (provider_language, extraction.get("language")) if code]
+    return build_record(
+        extraction,
+        {
+            "overall_verdict": annotation,
+            "safeguarding_flag": bool(extraction.get("safeguarding_flag")),
+            "clauses": kpi_clauses,
+        },
+        {
+            "caller_transcript_source": audio_url,
+            "turns": turns,
+            "detected_language": provider_language,
+            # Both codes, deduped: TeleExpert's guess and what the model heard the
+            # respondent actually speak. Two different languages here is the
+            # ``language_switched`` signal, not a bookkeeping detail.
+            "detected_languages": list(dict.fromkeys(detected)),
+        },
+        record_id=f"cw_{call_id}",
+        beneficiary_id=getattr(person, "worker_id", None) or "",
+        training_cohort_id=getattr(person, "training_cohort_id", None),
+        interview_date=datetime.now(UTC).date(),
+        attempts=attempts,
+        disposition=disposition,
+        age_band=getattr(person, "age_band", None),
+        gender=getattr(person, "gender", None),
+        cohort_size=cohort_size,
+    )
 
 
 def _persist_call_response(
@@ -759,7 +836,17 @@ def replay_fixture(db: Session, batch_id: str, worker_id: str, fixture: str) -> 
     batch = BatchRepository(db).get(batch_id)
     if batch is None:
         raise ValueError(f"Batch not found: {batch_id}")
-    path = Path("tests/fixtures/transcripts") / fixture
+    # Callwise provider transcripts live apart from the Member A/B contract
+    # fixtures: they are a different document shape, and the contract suites
+    # glob their own directory and validate everything in it.
+    path = next(
+        (
+            candidate
+            for directory in ("tests/fixtures/callwise", "tests/fixtures/transcripts")
+            if (candidate := Path(directory) / fixture).exists()
+        ),
+        Path("tests/fixtures/transcripts") / fixture,
+    )
     if path.suffix != ".json" or not path.exists():
         raise ValueError("fixture not found")
     payload = __import__("json").loads(path.read_text(encoding="utf-8"))
@@ -772,7 +859,16 @@ def replay_fixture(db: Session, batch_id: str, worker_id: str, fixture: str) -> 
         target = BatchTarget(batch_id=batch_id, worker_id=worker_id, call_id=f"fixture_{uuid4().hex}", status="dialing")
         db.add(target)
         db.commit()
-    return process_batch_call(db, target.call_id, transcript, payload.get("language") if isinstance(payload, dict) else None)
+    return process_batch_call(
+        db,
+        target.call_id,
+        transcript,
+        payload.get("language") if isinstance(payload, dict) else None,
+        # The turn array is what lets extraction cite the line an answer came
+        # from, so a replayed fixture must carry it or its record loses every
+        # evidence_turn and stops resembling a real one.
+        transcript_turns=turns if isinstance(turns, list) else None,
+    )
 
 
 # -- questions ------------------------------------------------------------- #
@@ -1041,7 +1137,9 @@ def process_batch_call(
         current = WorkerAnswersRepository(db).get((batch.batch_id, target.worker_id))
         if current is not None:
             return current
-    extraction = engine.extract_answers(transcript, target.worker_id, batch.questions or [])
+    extraction = engine.extract_answers(
+        transcript, target.worker_id, batch.questions or [], turns=transcript_turns or []
+    )
     company = db.get(Employer, batch.company_id)
     annotation, kpi_clauses = _good_job_annotation(extraction, company)
     disposition = _disposition_for(extraction)
@@ -1054,6 +1152,20 @@ def process_batch_call(
     retained_transcript = transcript if consented else None
     retained_turns = (transcript_turns or []) if consented else []
     retained_audio_url = audio_url if consented else None
+    person = BeneficiaryRepository(db).get(target.worker_id)
+    callwise_record = _callwise_record(
+        call_id=call_id,
+        extraction=extraction,
+        annotation=annotation,
+        kpi_clauses=kpi_clauses,
+        disposition=disposition,
+        turns=retained_turns,
+        provider_language=language,
+        audio_url=retained_audio_url,
+        person=person,
+        attempts=target.attempts or 1,
+        cohort_size=_cohort_size(db, getattr(person, "training_cohort_id", None)),
+    )
     stored_extraction = dict(extraction)
     stored_extraction["transcript"] = retained_transcript
     _persist_call_response(
@@ -1070,12 +1182,14 @@ def process_batch_call(
     )
     logger.info(
         "Callwise analysis completed call_id=%s worker_id=%s disposition=%s excluded=%s "
-        "age_assessment=%s answers=%s kpi=%s",
+        "age_assessment=%s counted=%s unresolved=%s answers=%s kpi=%s",
         call_id,
         target.worker_id,
         disposition,
         extraction.get("excluded"),
         extraction.get("age_assessment"),
+        callwise_record.get("counted"),
+        callwise_record.get("unresolved_clause_count"),
         json.dumps(extraction.get("answers") or {}, ensure_ascii=False, default=str),
         json.dumps(kpi_clauses or {}, ensure_ascii=False, default=str),
     )
@@ -1095,6 +1209,7 @@ def process_batch_call(
             "attempts": target.attempts or 1,
             "good_job_annotation": annotation,
             "kpi_clauses": kpi_clauses,
+            "callwise_record": callwise_record,
             "excluded": extraction["excluded"],
             "exclusion_reason": extraction["exclusion_reason"],
         }
@@ -1118,6 +1233,7 @@ def process_batch_call(
         attempts=target.attempts or 1,
         good_job_annotation=annotation,
         kpi_clauses=kpi_clauses,
+        callwise_record=callwise_record,
         excluded=extraction["excluded"],
         exclusion_reason=extraction["exclusion_reason"],
     )
@@ -1139,7 +1255,6 @@ def process_batch_call(
     _finish_attempt(db, call_id, disposition=disposition, reason=record.exclusion_reason)
     target_repository.update(target, {"status": "completed"})
 
-    person = BeneficiaryRepository(db).get(target.worker_id)
     who = person.name if person and person.name else target.worker_id
     if record.excluded:
         _say(

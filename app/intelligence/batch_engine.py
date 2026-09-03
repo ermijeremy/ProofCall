@@ -69,8 +69,20 @@ class BatchIntelligence:
         transcript: str,
         worker_id: str,
         question_set: list[dict[str, Any]],
+        turns: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Read one transcript into one answer per question, then safeguard it.
+
+        This is where the interview is parsed, and the only place it is parsed.
+        The model returns each answer twice: verbatim, and as a typed value.
+        Resolving the second one is language work -- Amharic negation, spoken
+        numbers, magnitude words, an Ethiopian-calendar date -- and the value it
+        returns is the only reading anybody makes of that answer. Code downstream
+        compares those values against thresholds; it never reads the words again.
+
+        ``turns`` is the raw provider turn array. Given it, the model sees a
+        numbered transcript and can cite the line each answer came from, which is
+        what makes a record hand-checkable by a reviewer.
 
         A provider failure is not allowed to look like a completed interview: it
         produces an empty answer set with ``extraction_error`` true, which counts
@@ -81,7 +93,7 @@ class BatchIntelligence:
         try:
             payload = self.provider.complete_json(
                 system=questions.build_extraction_prompt(question_set),
-                user=questions.build_extraction_request(text),
+                user=questions.build_extraction_request(text, turns),
             )
         except ProviderError:
             logger.exception("Answer extraction failed for %s", worker_id)

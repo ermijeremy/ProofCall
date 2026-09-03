@@ -52,12 +52,32 @@ def _months_from_start(value: Any, as_of: datetime | None = None) -> float | Non
 
 
 def _entry(answers: dict[str, Any], slug: str) -> dict[str, Any]:
+    """One answer, with the extractor's typed reading in front.
+
+    ``normalized`` is what the model resolved the answer to: a number, a boolean,
+    a closed-vocabulary label, a Gregorian month. It takes precedence over
+    ``value``, which is the respondent's own words and is kept only so a reviewer
+    can check the reading. Nothing below this line reads those words -- it could
+    not: they are usually Amharic, and "13 ሺ" is thirteen thousand only to
+    somebody who reads the language.
+
+    An object ``normalized`` is merged, so ``hours_per_week`` and ``amount_etb``
+    land where the thresholds below already look for them. A scalar replaces
+    ``value``. The regex helpers left in this module are the fallback for
+    deterministic callers and older fixtures that carry no typed reading.
+    """
+
     value = answers.get(slug)
-    if isinstance(value, dict):
-        return value
-    # Useful for deterministic callers and migration of early fixture data;
-    # provider output is normally already in the structured shape.
-    return {"value": value, "state": "STATED"} if value is not None else {}
+    if not isinstance(value, dict):
+        # Useful for deterministic callers and migration of early fixture data;
+        # provider output is normally already in the structured shape.
+        return {"value": value, "state": "STATED"} if value is not None else {}
+    normalized = value.get("normalized")
+    if isinstance(normalized, dict):
+        return {**value, **{key: item for key, item in normalized.items() if item is not None}}
+    if normalized is not None:
+        return {**value, "value": normalized}
+    return value
 
 
 def _clause(entry: dict[str, Any], status: str, value: Any = _UNSET) -> dict[str, Any]:

@@ -1,0 +1,209 @@
+{
+  "caller_transcript_source": "gemini_transcribe_postcall",
+  "turns": [
+    {
+      "role": "assistant",
+      "text": "ሰላም። አማርኛ ወይስ English? Amharic or English, whichever is easier for you.",
+      "offset_seconds": 0.0
+    },
+    {
+      "role": "caller",
+      "text": "አማርኛ",
+      "offset_seconds": 7.8
+    },
+    {
+      "role": "assistant",
+      "text": "እሺ። እኔ የቢሲንጉላሪቲ ስልጠናን በተመለከተ መረጃ ለመሰብሰብ የምደውል ኤአይ ስልክ ጠያቂ ነኝ። ጥያቄዎቹን ለመጠየቅ የአምስት ደቂቃ ያህል ጊዜ ይወስዳል፤ በስልጠናውም ሆነ በስራዎ ላይ ምንም አይነት ተጽእኖ አይኖረውም። የሚናገሩት በማንነትዎ አይመዘገብም። ለመቀጠል ፈቃደኛ ነዎት?",
+      "offset_seconds": 28.989
+    },
+    {
+      "role": "caller",
+      "text": "አዎ",
+      "offset_seconds": 29.7
+    },
+    {
+      "role": "assistant",
+      "text": "መልካም። አንደኛ፣ ስምዎን አይጠበቅብኝም፤ ያለ ስምዎ ምላሾችዎን መመዝገብ እችላለሁ። ሁለተኛ፣ በማንኛውም ሰዓት ማቆም ይችላሉ። “ቁም” ቢሉኝ አቆማለሁ። “ይህ አይቀረጽ” ቢሉኝ ደግሞ እስካሁን የተናገሩትን ጭምር ሙሉ ጥሪውን እሰርዘዋለሁ። ሶስተኛ፣ ለአንዳንድ ጥያቄዎች መልስ መስጠት፣ ለአንዳንዶቹ ደግሞ አለመስጠት ይችላሉ። ለአንድ ጥያቄ መልስ አለመስጠት እንደ መደበኛ መልስ ነው የሚታየው። መጀመር እችላለሁ?",
+      "offset_seconds": 60.942
+    },
+    {
+      "role": "caller",
+      "text": "አዎ ትችላለች",
+      "offset_seconds": 61.9
+    },
+    {
+      "role": "assistant",
+      "text": "እድሜዎ ስንት ነው?",
+      "offset_seconds": 66.325
+    },
+    {
+      "role": "caller",
+      "text": "21",
+      "offset_seconds": 67.2
+    },
+    {
+      "role": "assistant",
+      "text": "በአሁኑ ሰዓት በማንኛውም አይነት ስራ ላይ ተሰማርተው ይገኛሉ? በክፍያ ወይስ በራስዎ?",
+      "offset_seconds": 74.981
+    },
+    {
+      "role": "caller",
+      "text": "እ በክፍያ ተቀጥረያለሁ",
+      "offset_seconds": 76.4
+    },
+    {
+      "role": "assistant",
+      "text": "ያ ስራ በሽያጭ ላይ ወይስ ደንበኞችን በማስተናገድ ላይ ያተኮረ ነው?",
+      "offset_seconds": 84.534
+    },
+    {
+      "role": "caller",
+      "text": "አዎ",
+      "offset_seconds": 85.7
+    },
+    {
+      "role": "assistant",
+      "text": "ክፍያ የሚከፍልዎ ኩባንያ ነው ወይስ የራስዎ ንግድ? ወይስ ቀን በቀን ወይስ በየወቅቱ?",
+      "offset_seconds": 94.267
+    },
+    {
+      "role": "caller",
+      "text": "እ ክፍያ የሚከፍለኝ በድርጅቱ ነው የራሴ አይደለም",
+      "offset_seconds": 95.6
+    },
+    {
+      "role": "assistant",
+      "text": "ይህን ስራ የጀመሩት በየትኛው ወርና አመተ ምህረት ነው?",
+      "offset_seconds": 106.587
+    },
+    {
+      "role": "caller",
+      "text": "ሃምሌ በዚህ አመት ወይም 2018",
+      "offset_seconds": 108.9
+    },
+    {
+      "role": "assistant",
+      "text": "ከጀመሩት ጊዜ ጀምሮ ያለ ምንም ማቋረጥ እየሰሩበት ነው ወይስ መሃል ላይ ስራ ያቆሙበት ጊዜ ነበረ?",
+      "offset_seconds": 120.123
+    },
+    {
+      "role": "caller",
+      "text": "አይ አላቋረጥኩም እየሰራሁ ነው እስካሁን",
+      "offset_seconds": 122.0
+    },
+    {
+      "role": "assistant",
+      "text": "በተለመደው ሳምንት ስንት ቀን ይሰሩታል? በቀንስ ስንት ሰዓት ያህል?",
+      "offset_seconds": 130.858
+    },
+    {
+      "role": "caller",
+      "text": "በሳምንት አምስት ቀን ነው የምሰራው እና ቀን ደግሞ ሰባት ሰአት እሰራለሁ",
+      "offset_seconds": 132.1
+    },
+    {
+      "role": "assistant",
+      "text": "በተለመደው ወር ምን ያህል ገቢ ያገኛሉ? እጅዎ ላይ ከመድረሱ በፊት የሚቆረጥ ነገር አለ?",
+      "offset_seconds": 146.058
+    },
+    {
+      "role": "caller",
+      "text": "አዎ ግብር ይቆረጣል ያው ከግብር ውጪ ወደ 13 ሺ ብር አገኛለሁ",
+      "offset_seconds": 147.9
+    },
+    {
+      "role": "assistant",
+      "text": "ምንም ሳይጠበቅብዎትና ወረቀቶችዎንም ማንም ሳይይዝብዎት ይህን ስራ በማንኛውም ሰዓት መልቀቅ ይችላሉ?",
+      "offset_seconds": 162.824
+    },
+    {
+      "role": "caller",
+      "text": "አዎ እችላለሁ ችግር የለውም",
+      "offset_seconds": 164.2
+    },
+    {
+      "role": "assistant",
+      "text": "እዛው ላይ ተመሳሳይ ስራ ከሚሰሩ ሌሎች ሰዎች ጋር እኩል ክፍያና አያያዝ ያገኛሉ?",
+      "offset_seconds": 172.227
+    },
+    {
+      "role": "caller",
+      "text": "አዎ ተመሳሳይ ነው",
+      "offset_seconds": 173.9
+    },
+    {
+      "role": "assistant",
+      "text": "ሰራተኞች በጋራ ሆነው ችግራቸውን ማቅረብ ይችላሉ? ወይስ ለነሱ ተሟጋች የሆነላቸው ሰው አለ?",
+      "offset_seconds": 182.349
+    },
+    {
+      "role": "caller",
+      "text": "ወደ ቀጣዩ",
+      "offset_seconds": 199.6
+    },
+    {
+      "role": "assistant",
+      "text": "ስልጠናው ካለቀ በኋላ የመጀመሪያውን ስራ እስኪያገኙ ምን ያህል ጊዜ ፈጀብዎት?",
+      "offset_seconds": 206.678
+    },
+    {
+      "role": "caller",
+      "text": "ሁለት ወር",
+      "offset_seconds": 208.7
+    },
+    {
+      "role": "assistant",
+      "text": "ስልጠናው ያን ስራ ለማግኘት ምን ያህል ረድቶዎታል? በጣም፣ በከፊል፣ ትንሽ፣ ወይስ በጭራሽ?",
+      "offset_seconds": 217.196
+    },
+    {
+      "role": "caller",
+      "text": "እ በጣም ረድቶኛል",
+      "offset_seconds": 218.4
+    },
+    {
+      "role": "assistant",
+      "text": "ከስልጠናው ክፍሎች ዛሬ በስራዎ ላይ በብዛት የሚጠቀሙበት ክፍል የትኛው ነው?",
+      "offset_seconds": 226.064
+    },
+    {
+      "role": "caller",
+      "text": "የአመሸጥ ቴክኒክ",
+      "offset_seconds": 227.8
+    },
+    {
+      "role": "assistant",
+      "text": "ከአንድ እስከ አምስት ባለው መስፈርት፣ በስልጠናው ምን ያህል ረክተዋል? አንድ በጣም ደስተኛ ያልሆኑ፣ አምስት ደግሞ በጣም ደስተኛ የሆኑ።",
+      "offset_seconds": 239.266
+    },
+    {
+      "role": "caller",
+      "text": "ሶስት",
+      "offset_seconds": 240.6
+    },
+    {
+      "role": "assistant",
+      "text": "ከስልጠናው በኋላ ሌላ ምን የተለወጠ ነገር አለ?",
+      "offset_seconds": 254.058
+    },
+    {
+      "role": "caller",
+      "text": "ያው ስራ አግኝቻለሁ እና ለዛ ረድቶኛል እሱን ከሆነ የምትፈልጊው",
+      "offset_seconds": 257.3
+    },
+    {
+      "role": "assistant",
+      "text": "አመሰግናለሁ። ስለ ስራዎና ስለ ስልጠናው የነገሩኝን ያለ ስምዎ መዝግቤያለሁ። ቢሲንጉላሪቲ የጠቅላላ ቡድኑን ማጠቃለያ ነው የሚያየው። በኋላ ላይ መልሶችዎ እንዲሰረዙ ከፈለጉ፣ ለቢሲንጉላሪቲ በመናገር እንዲሰረዙ ማድረግ ይችላሉ። መልካም እድል።",
+      "offset_seconds": 278.463
+    },
+    {
+      "role": "caller",
+      "text": "እ ማን",
+      "offset_seconds": 282.1
+    }
+  ],
+  "detected_language": "am-ET",
+  "detected_languages": [
+    "am-ET"
+  ]
+}

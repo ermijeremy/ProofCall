@@ -11,7 +11,8 @@ from app.services.reporting_service import csv_bytes, report, worker_rows, xlsx_
 class OfflineCallwiseEngine:
     name = "offline-test"
 
-    def extract_answers(self, transcript: str, worker_id: str, question_set: list[dict[str, Any]]) -> dict[str, Any]:
+    def extract_answers(self, transcript: str, worker_id: str, question_set: list[dict[str, Any]],
+                        turns: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         return {
             "worker_id": worker_id,
             "consent": True,
