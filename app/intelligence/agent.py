@@ -60,20 +60,31 @@ def _tool(name: str, description: str, properties: dict[str, Any], required: Seq
 #: that dials without a confirmation and no tool that invents a count.
 TOOLS: list[dict[str, Any]] = [
     _tool(
-        "set_questions",
-        "Record the questions to ask employees in a new round of interviews. Use "
-        "this whenever the administrator gives you questions, however they are "
-        "written: numbered, bulleted, one per line, or in a sentence. Pass each "
-        "question separately, in the order given, in the administrator's own "
-        "words. Do not add an age question; that is always asked first anyway.",
+        "add_people",
+        "Add one or more employees directly to the company's roster when the administrator provides names and phone numbers in chat. Use this for a small update instead of asking for another CSV. Do not call anybody with this tool.",
         {
-            "questions": {
+            "people": {
                 "type": "array",
-                "items": {"type": "string"},
-                "description": "One entry per question, as the administrator wrote it.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "phone_number": {"type": "string"},
+                    },
+                    "required": ["name", "phone_number"],
+                },
+                "description": "Each employee's full name and phone number.",
             }
         },
-        ["questions"],
+        ["people"],
+    ),
+
+    _tool(
+        "set_questions",
+        "Initialize a new round with the fixed Callwise KPI questionnaire. "
+        "Never accept, store, or invent administrator-authored questions. "
+        "The fixed 16-question set is created by code.",
+        {},
     ),
     _tool(
         "select_people",
@@ -208,19 +219,24 @@ talks to you in one chat thread per company. You read each message and choose
 exactly one action.
 
 WHAT YOU ARE FOR
-The administrator uploads a list of employees once, types questions, tells you who
-to telephone, and asks about the answers that come back. Each set of questions is
-one round. The list of people belongs to the company and is reused every round.
+The administrator uploads a list of employees once, tells you who to telephone,
+and asks about the answers that come back. Every round uses the fixed Callwise KPI
+questionnaire created by code. The list of people belongs to the company and is
+reused every round.
 
 HOW TO CHOOSE
 Read the message together with the context block, which holds the company, the
 list of people with their worker_ids, the current round, the counts so far, and
 the current local time. Then call exactly one tool.
 
-Questions to be asked go to set_questions. Who to telephone goes to
-select_people. A time goes to schedule_calls, or to ask_schedule when something
+The fixed questionnaire is initialized by code; never ask the administrator to
+author questions. Who to telephone goes to select_people. A time goes to
+schedule_calls, or to ask_schedule when something
 about it is missing. A clear agreement to call now goes to dial_now. A question
 about the results goes to answer. Anything else goes to ask.
+When the administrator provides a small number of employee names and phone
+numbers in chat, use add_people. Do not ask them to upload a CSV for that small
+update; CSV remains available for bulk imports.
 
 NUMBERS
 Every count you are given has been computed from stored answers. Quote them.

@@ -85,9 +85,9 @@ def resolve(
 
     # Imported here, not at module scope: the intelligence layer does not depend
     # on the service layer, and the sampler is injectable for tests anyway.
-    from app.services.sampling_service import sample_from
+    from app.services.sampling_service import sample_callwise
 
-    draw = sampler or sample_from
+    draw = sampler or sample_callwise
     reached = already_called or set()
     candidates = [person for person in roster if not person.get("excluded")]
     skipped: list[str] = []

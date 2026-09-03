@@ -22,7 +22,7 @@ from app.services.batch_service import (
     debug_snapshot,
     replay_fixture,
 )
-from app.services.reporting_service import csv_bytes, report, worker_csv_bytes, worker_report, xlsx_bytes
+from app.services.reporting_service import csv_bytes, report, worker_report, worker_rows, xlsx_bytes
 
 router = APIRouter(prefix="/batches", tags=["batches"])
 
@@ -97,8 +97,13 @@ def export_report(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     filename = f"callproof-{batch_id}-report"
     if format == "csv":
+        # The admin spreadsheet export is identity-bearing by design. The JSON
+        # report remains aggregate-only, while CSV/XLSX contain one row per
+        # roster member and one column per fixed KPI question.
+        data["worker_rows"] = worker_rows(db, batch_id)
         return Response(csv_bytes(data), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="{filename}.csv"'})
     if format == "xlsx":
+        data["worker_rows"] = worker_rows(db, batch_id)
         return Response(xlsx_bytes(data), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f'attachment; filename="{filename}.xlsx"'})
     return Response(json.dumps(data, ensure_ascii=False, indent=2), media_type="application/json", headers={"Content-Disposition": f'attachment; filename="{filename}.json"'})
 
@@ -107,7 +112,7 @@ def export_report(
 def export_worker(
     batch_id: str,
     worker_id: str,
-    format: str = Query(default="json", pattern="^(json|csv)$"),
+    format: str = Query(default="json", pattern="^json$"),
     db: Session = Depends(get_db),
 ) -> Response:
     try:
@@ -115,8 +120,6 @@ def export_worker(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     filename = f"callproof-{batch_id}-{worker_id}"
-    if format == "csv":
-        return Response(worker_csv_bytes(data), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="{filename}.csv"'})
     return Response(json.dumps(data, ensure_ascii=False, indent=2), media_type="application/json", headers={"Content-Disposition": f'attachment; filename="{filename}.json"'})
 
 

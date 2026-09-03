@@ -69,6 +69,14 @@ class BatchTargetRepository(Repository[BatchTarget]):
         statement = select(BatchTarget).where(BatchTarget.call_id == call_id)
         return self.db.scalars(statement).first()
 
+    def due_retries(self, moment: datetime) -> list[BatchTarget]:
+        statement = (
+            select(BatchTarget)
+            .where(BatchTarget.status == "retry_wait", BatchTarget.next_attempt_at <= moment)
+            .order_by(BatchTarget.next_attempt_at)
+        )
+        return list(self.db.scalars(statement).all())
+
     def replace_unconfirmed(self, batch_id: str, worker_ids: list[str]) -> list[BatchTarget]:
         """Store a freshly drawn selection, keeping anyone already dialed.
 

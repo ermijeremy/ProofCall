@@ -26,7 +26,7 @@
   <div>
     <h2>Companies</h2>
     <p class="muted">{{ companies|length }} {{ "conversation" if companies|length == 1 else "conversations" }}.
-      One thread per company: open a card to upload people, set questions, and call.</p>
+      One thread per company: open a card to upload people, run the fixed KPI interview, and review results.</p>
   </div>
   <button class="primary-button" id="new-company" type="button">+ Add company</button>
 </div>
@@ -52,7 +52,7 @@
   {% else %}
   <div class="empty">
     <h2>No companies yet</h2>
-    <p>Add a company, upload the people to interview, and type the questions you want them asked.</p>
+    <p>Add a company, upload the people to interview, and run the fixed Callwise KPI questionnaire.</p>
     <button class="primary-button" id="new-company-empty" type="button">+ Add company</button>
   </div>
   {% endfor %}

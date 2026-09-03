@@ -1,13 +1,9 @@
-"""Interview-batch persistence: the question set, its thread, and its answers.
+"""Callwise validation-batch persistence.
 
-A batch is one admin session: a roster imported from a CSV, a list of questions
-typed into the thread, the people selected to be called, and the answers that
-came back.
-
-These tables sit beside :mod:`app.models.evidence` rather than replacing it. The
-clause-based path stores a closed set of statuses in ``worker_evidence``; a batch
-stores whatever the admin asked about, with a category the model derived for that
-batch, which no closed literal can describe in advance.
+A batch is one admin review round: a roster imported from CSV, the fixed KPI
+questionnaire, selected workers, calls, and immutable answer snapshots. The
+question set is stored for audit/export, but it is never authored by the chat
+model or replaced by free-form administrator text.
 """
 
 from datetime import datetime
@@ -27,14 +23,12 @@ class InterviewBatch(Base):
     batch_id: Mapped[str] = mapped_column(String(100), primary_key=True)
     company_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(255), default="Untitled batch", nullable=False)
-    #: Ordered ``[{"index": int, "text": str, "slug": str}]``. Empty until the
-    #: admin types the questions.
+    #: Ordered fixed Callwise KPI questionnaire.
     questions: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, nullable=False)
     #: Pass-two output: ``{slug: {"categories": [...], "assignments": {...}}}``.
     categories: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
-    #: Compatibility field for databases created by the previous round-scoped
-    #: design. New code does not read it; the empty default lets those existing
-    #: schemas accept company-scoped batches while they are gradually replaced.
+    #: Deprecated roster compatibility field. New selection is persisted in
+    #: ``batch_targets``; retained only while existing databases are migrated.
     roster_worker_ids: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     language: Mapped[str] = mapped_column(String(20), default="am", nullable=False)
     #: draft -> ready -> selected -> (scheduled) -> calling -> complete
@@ -48,6 +42,18 @@ class InterviewBatch(Base):
     #: two that :class:`~app.models.interview.InterviewSchedule` uses, and is said
     #: out loud in the thread whenever the admin did not choose it.
     retries: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
+    questionnaire_version: Mapped[str] = mapped_column(String(30), default="callwise-v1", nullable=False)
+    prompt_version: Mapped[str] = mapped_column(String(30), default="callwise-prompt-v1", nullable=False)
+    record_schema_version: Mapped[str] = mapped_column(String(30), default="callwise-record-v1", nullable=False)
+    maximum_duration_seconds: Mapped[int] = mapped_column(Integer, default=360, nullable=False)
+    retry_delay_hours: Mapped[int] = mapped_column(Integer, default=24, nullable=False)
+    source_checksum: Mapped[Any] = mapped_column(String(64), nullable=True)
+    source_row_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    eligible_row_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    primary_target_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    spare_target_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    started_at: Mapped[Any] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[Any] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 
@@ -66,6 +72,11 @@ class BatchTarget(Base):
     call_id: Mapped[Any] = mapped_column(String(100), nullable=True, index=True)
     #: selected -> dialing -> completed | failed
     status: Mapped[str] = mapped_column(String(30), default="selected", nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    next_attempt_at: Mapped[Any] = mapped_column(DateTime, nullable=True, index=True)
+    failure_reason: Mapped[Any] = mapped_column(Text, nullable=True)
+    is_primary_sample: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_spare: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     selected_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 
@@ -107,9 +118,16 @@ class WorkerAnswers(Base):
     consent: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     language: Mapped[Any] = mapped_column(String(20), nullable=True)
     transcript: Mapped[Any] = mapped_column(Text, nullable=True)
+    transcript_turns: Mapped[Any] = mapped_column(JSON, nullable=True)
+    audio_url: Mapped[Any] = mapped_column(Text, nullable=True)
+    disposition: Mapped[str] = mapped_column(String(30), default="completed", nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    good_job_annotation: Mapped[str] = mapped_column(String(30), default="UNCLEAR", nullable=False)
+    kpi_clauses: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     #: Set by code from a model-supplied label. An excluded record is counted nowhere.
     excluded: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     exclusion_reason: Mapped[Any] = mapped_column(Text, nullable=True)
+    consent_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 
@@ -131,6 +149,32 @@ class WorkerAnswerRecord(Base):
     consent: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     language: Mapped[Any] = mapped_column(String(20), nullable=True)
     transcript: Mapped[Any] = mapped_column(Text, nullable=True)
+    transcript_turns: Mapped[Any] = mapped_column(JSON, nullable=True)
+    audio_url: Mapped[Any] = mapped_column(Text, nullable=True)
+    disposition: Mapped[str] = mapped_column(String(30), default="completed", nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    good_job_annotation: Mapped[str] = mapped_column(String(30), default="UNCLEAR", nullable=False)
+    kpi_clauses: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     excluded: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     exclusion_reason: Mapped[Any] = mapped_column(Text, nullable=True)
+    consent_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
+class CallAttempt(Base):
+    """Immutable operational history for every TeleExpert phone attempt."""
+
+    __tablename__ = "call_attempts"
+
+    attempt_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    batch_id: Mapped[str] = mapped_column(ForeignKey("interview_batches.batch_id"), nullable=False, index=True)
+    worker_id: Mapped[str] = mapped_column(ForeignKey("beneficiaries.worker_id"), nullable=False, index=True)
+    call_id: Mapped[str] = mapped_column(ForeignKey("teleexpert_calls.call_id"), nullable=False, index=True)
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    provider_state: Mapped[str] = mapped_column(String(30), default="queued", nullable=False)
+    disposition: Mapped[Any] = mapped_column(String(30), nullable=True)
+    failure_reason: Mapped[Any] = mapped_column(Text, nullable=True)
+    scheduled_at: Mapped[Any] = mapped_column(DateTime, nullable=True)
+    started_at: Mapped[Any] = mapped_column(DateTime, nullable=True)
+    ended_at: Mapped[Any] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False, index=True)

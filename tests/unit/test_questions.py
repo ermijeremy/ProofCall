@@ -71,7 +71,7 @@ def test_interview_prompt_asks_consent_first_and_stops_silently_for_a_child():
         questions_module.build_question_set(ADMIN_QUESTIONS),
     )
     consent = prompt.index("voluntary")
-    assert consent < prompt.index("FIRST QUESTION, ALWAYS")
+    assert consent < prompt.index("FIRST SUBSTANTIVE QUESTION")
     assert "do not ask a single further" in prompt
     assert "do not mention any age rule" in prompt
 
@@ -92,8 +92,8 @@ def test_worker_language_beats_the_batch_default():
         questions_module.build_question_set(ADMIN_QUESTIONS),
         language="am",
     )
-    assert "Swahili" in prompt
-    assert "Amharic" not in prompt
+    assert "Amharic" in prompt
+    assert "Swahili" not in prompt
 
 
 def test_batch_language_is_used_when_the_worker_has_none():
@@ -102,7 +102,8 @@ def test_batch_language_is_used_when_the_worker_has_none():
         questions_module.build_question_set(ADMIN_QUESTIONS),
         language="ti",
     )
-    assert "Tigrinya" in prompt
+    assert "Amharic" in prompt
+    assert "The planned language (Amharic)" in prompt
 
 
 def test_extraction_prompt_names_every_question_and_asks_only_for_an_age_label():

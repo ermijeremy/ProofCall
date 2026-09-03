@@ -1,0 +1,2 @@
+beneficiary_id,first_name,phone_e164,preferred_language,gender,age_band,training_cohort_id,training_end_date,placement_status_per_besingularity,placement_date,consent_to_followup_contact,notes
+MOCK-2026-0001,Mock Worker,+251963536140,am,F,25+,MOCK-2026-01,2026-04-30,placed_job,2026-06-15,yes;2026-04-30;registration_form,Local TeleExpert validation worker

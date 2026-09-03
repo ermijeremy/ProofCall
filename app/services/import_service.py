@@ -30,7 +30,10 @@ def _optional_int(value: str | None) -> int | None:
 
 
 def _csv_rows(content: bytes) -> Iterable[dict[str, str]]:
-    text = content.decode("utf-8-sig")
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise ValueError("CSV must be UTF-8 encoded") from exc
     reader = csv.DictReader(io.StringIO(text))
     if not reader.fieldnames:
         raise ValueError("CSV file must include a header row")

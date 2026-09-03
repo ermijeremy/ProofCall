@@ -69,6 +69,9 @@ TRANSPORT_ERRORS = (
     "Errno 32",
     "timed out",
     "Temporary failure in name resolution",
+    "Name or service not known",
+    "nodename nor servname",
+    "Network is unreachable",
 )
 
 #: How many transport failures to ride out before giving up on the request.

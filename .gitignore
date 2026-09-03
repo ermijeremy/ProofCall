@@ -5,6 +5,9 @@ __pycache__/
 *.db
 *.db-journal
 
+# Local Callwise completion artifacts may contain transcripts or media links.
+data/callwise_responses/*.json
+
 # Secrets. GEMINI_API_KEY holds live Google API keys; never commit them.
 .env
 .env.*

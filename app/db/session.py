@@ -51,6 +51,8 @@ def _upgrade_legacy_sqlite_schema() -> None:
         "age_band_breakdown": "JSON NOT NULL DEFAULT '{}'",
         "timezone": "VARCHAR(64) NOT NULL DEFAULT ''",
         "clock_convention": "VARCHAR(20) NOT NULL DEFAULT ''",
+        "minimum_wage_etb": "INTEGER",
+        "small_cell_threshold": "INTEGER NOT NULL DEFAULT 5",
     }
     table_upgrades = {
         "employers": employer_columns,
@@ -62,21 +64,67 @@ def _upgrade_legacy_sqlite_schema() -> None:
         },
         "beneficiaries": {
             "name": "VARCHAR(255) NOT NULL DEFAULT ''",
+            "gender": "VARCHAR(20)",
+            "age_band": "VARCHAR(20)",
+            "training_cohort_id": "VARCHAR(100)",
+            "training_end_date": "DATE",
+            "placement_status": "VARCHAR(30)",
+            "placement_date": "DATE",
+            "consent_to_followup_contact": "BOOLEAN NOT NULL DEFAULT 0",
+            "consent_recorded_at": "DATE",
+            "consent_source": "VARCHAR(30)",
+            "notes": "TEXT",
         },
         "teleexpert_webhook_events": {
             "attempts": "INTEGER NOT NULL DEFAULT 0",
         },
         "interview_batches": {
-            # roster_worker_ids was dropped when the thread became company-scoped:
-            # the roster is the company's, so per-round membership was scoping
-            # around a duplicate-import bug instead of fixing it. SQLite cannot
-            # drop a column in place and a stale one is harmless, so it is left
-            # alone on existing databases rather than migrated away.
+            # Keep this compatibility column available for databases created by
+            # either batch design. New code does not use it, but SQLAlchemy still
+            # selects mapped columns when loading scheduled batches.
+            "roster_worker_ids": "JSON NOT NULL DEFAULT '[]'",
             "scheduled_at": "DATETIME",
             "retries": "INTEGER NOT NULL DEFAULT 2",
+            "questionnaire_version": "VARCHAR(30) NOT NULL DEFAULT 'callwise-v1'",
+            "prompt_version": "VARCHAR(30) NOT NULL DEFAULT 'callwise-prompt-v1'",
+            "record_schema_version": "VARCHAR(30) NOT NULL DEFAULT 'callwise-record-v1'",
+            "maximum_duration_seconds": "INTEGER NOT NULL DEFAULT 360",
+            "retry_delay_hours": "INTEGER NOT NULL DEFAULT 24",
+            "source_checksum": "VARCHAR(64)",
+            "source_row_count": "INTEGER NOT NULL DEFAULT 0",
+            "eligible_row_count": "INTEGER NOT NULL DEFAULT 0",
+            "primary_target_count": "INTEGER NOT NULL DEFAULT 0",
+            "spare_target_count": "INTEGER NOT NULL DEFAULT 0",
+            "started_at": "DATETIME",
+            "completed_at": "DATETIME",
         },
         "batch_messages": {
             "company_id": "VARCHAR(100) NOT NULL DEFAULT ''",
+        },
+        "worker_answers": {
+            "transcript_turns": "JSON",
+            "audio_url": "TEXT",
+            "disposition": "VARCHAR(30) NOT NULL DEFAULT 'completed'",
+            "attempts": "INTEGER NOT NULL DEFAULT 1",
+            "good_job_annotation": "VARCHAR(30) NOT NULL DEFAULT 'UNCLEAR'",
+            "kpi_clauses": "JSON NOT NULL DEFAULT '{}'",
+            "consent_json": "JSON NOT NULL DEFAULT '{}'",
+        },
+        "worker_answer_records": {
+            "transcript_turns": "JSON",
+            "audio_url": "TEXT",
+            "disposition": "VARCHAR(30) NOT NULL DEFAULT 'completed'",
+            "attempts": "INTEGER NOT NULL DEFAULT 1",
+            "good_job_annotation": "VARCHAR(30) NOT NULL DEFAULT 'UNCLEAR'",
+            "kpi_clauses": "JSON NOT NULL DEFAULT '{}'",
+            "consent_json": "JSON NOT NULL DEFAULT '{}'",
+        },
+        "batch_targets": {
+            "attempts": "INTEGER NOT NULL DEFAULT 0",
+            "next_attempt_at": "DATETIME",
+            "failure_reason": "TEXT",
+            "is_primary_sample": "BOOLEAN NOT NULL DEFAULT 1",
+            "is_spare": "BOOLEAN NOT NULL DEFAULT 0",
         },
     }
     with engine.begin() as connection:

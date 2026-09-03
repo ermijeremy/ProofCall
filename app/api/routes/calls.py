@@ -16,11 +16,18 @@ from app.db.session import get_db
 from app.integrations.teleexpert_client import TeleExpertClient, TeleExpertError
 from app.models.webhook import TeleExpertWebhookEvent
 from app.repositories.calls import CallRepository
+from app.repositories.batches import WorkerAnswerRecordRepository
 from app.schemas.call import CallCreate, CallStatusRead
 from app.services.call_service import cancel_call, submit_teleexpert_call, sync_call_status
 from app.services.teleexpert_service import process_webhook_event
 
 router = APIRouter(prefix="/teleexpert", tags=["calls"])
+
+
+def _consent_allows_media(db: Session, call_id: str) -> bool:
+    """Return whether a completed Callwise result may expose call media."""
+    history = WorkerAnswerRecordRepository(db).by_call(call_id)
+    return bool(history and history.consent)
 
 
 @router.post("/calls", response_model=CallStatusRead, status_code=status.HTTP_202_ACCEPTED)
@@ -68,6 +75,8 @@ def transcript(call_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
     """Proxy the authenticated TeleExpert transcript to the dashboard client."""
     if CallRepository(db).get(call_id) is None:
         raise HTTPException(status_code=404, detail=f"Call not found: {call_id}")
+    if not _consent_allows_media(db, call_id):
+        raise HTTPException(status_code=404, detail="Transcript is unavailable for this call")
     try:
         return TeleExpertClient().get_transcript(call_id)
     except TeleExpertError as exc:
@@ -79,6 +88,8 @@ def audio(call_id: str, db: Session = Depends(get_db)) -> Response:
     """Proxy authenticated TeleExpert audio without exposing its bearer token."""
     if CallRepository(db).get(call_id) is None:
         raise HTTPException(status_code=404, detail=f"Call not found: {call_id}")
+    if not _consent_allows_media(db, call_id):
+        raise HTTPException(status_code=404, detail="Audio is unavailable for this call")
     try:
         return Response(
             content=TeleExpertClient().get_audio(call_id),

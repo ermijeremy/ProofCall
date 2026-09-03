@@ -34,3 +34,22 @@ def sample_from(candidates: list[ItemT], sample_size: int) -> list[ItemT]:
     if requested < 0:
         raise ValueError(f"Requested sample of {requested}, which is not a size")
     return random_source.sample(candidates, requested)
+
+
+def sample_callwise(candidates: list[dict], sample_size: int) -> list[dict]:
+    """Randomly sample while preserving the placed/not-placed split."""
+    requested = len(candidates) if sample_size == 0 else sample_size
+    if requested < 0 or requested > len(candidates):
+        raise ValueError(f"Requested sample of {requested}, but only {len(candidates)} are available")
+    placed = [item for item in candidates if item.get("placement_status") in {"placed_job", "gig"}]
+    other = [item for item in candidates if item not in placed]
+    placed_n = min(len(placed), requested // 2)
+    other_n = min(len(other), requested - placed_n)
+    remainder = requested - placed_n - other_n
+    if remainder:
+        extra = min(remainder, len(placed) - placed_n)
+        placed_n += extra
+        remainder -= extra
+    if remainder:
+        other_n += min(remainder, len(other) - other_n)
+    return random_source.sample(placed, placed_n) + random_source.sample(other, other_n)

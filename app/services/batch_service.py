@@ -23,25 +23,31 @@ Three rules shape the file, in order of how much damage breaking them does:
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import re
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
 
 from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from app.core.config import settings
 from app.integrations.teleexpert_client import TeleExpertError
 from app.intelligence import agent, analysis, categorize as categorize_module, questions as questions_module
 from app.intelligence.batch_engine import BatchIntelligence, build_batch_intelligence
 from app.intelligence.providers.base import ProviderError
-from app.models.batch import BatchMessage, BatchTarget, InterviewBatch, WorkerAnswers
+from app.models.batch import BatchMessage, BatchTarget, CallAttempt, InterviewBatch, WorkerAnswerRecord, WorkerAnswers
 from app.models.employer import Employer
 from app.repositories.batches import (
     BatchMessageRepository,
     BatchRepository,
     BatchTargetRepository,
+    WorkerAnswerRecordRepository,
     WorkerAnswersRepository,
 )
 from app.repositories.beneficiaries import BeneficiaryRepository
@@ -78,10 +84,88 @@ WAITING_ON = {
 
 TERMINAL_TARGET_STATUSES = frozenset({"completed", "failed"})
 
-CONTACT_HEADERS = ("contact", "phone", "phone_number", "telephone", "number")
-NAME_HEADERS = ("name", "full_name", "employee", "employee_name")
+CONTACT_HEADERS = ("contact", "phone", "phone_number", "phone_e164", "telephone", "number")
+NAME_HEADERS = ("name", "first_name", "full_name", "employee", "employee_name")
+GENDER_HEADERS = ("gender", "sex")
+AGE_BAND_HEADERS = ("age_band", "ageband")
+COHORT_HEADERS = ("training_cohort_id", "cohort", "cohort_id")
+TRAINING_END_HEADERS = ("training_end_date", "training_end")
+PLACEMENT_STATUS_HEADERS = ("placement_status_per_besingularity", "placement_status")
+PLACEMENT_DATE_HEADERS = ("placement_date",)
+FOLLOWUP_HEADERS = ("consent_to_followup_contact", "followup_consent")
+BENEFICIARY_HEADERS = ("beneficiary_id", "worker_id", "id")
+NOTES_HEADERS = ("notes", "note")
+ALLOWED_LANGUAGES = {"am", "en", "other"}
+ALLOWED_GENDERS = {"F", "M", ""}
+ALLOWED_PLACEMENT = {"placed_job", "gig", "not_placed", "unknown", "lost_contact", ""}
+_PHONE_E164 = re.compile(r"^\+2519\d{8}$")
 
 _NOT_DIGITS = re.compile(r"[^0-9+]")
+
+
+def _good_job_annotation(extraction: dict[str, Any], company: Employer | None = None) -> tuple[str, dict[str, Any]]:
+    """Apply the deterministic Callwise KPI rules to extracted answers."""
+    from app.intelligence.callwise_rules import evaluate
+    result = evaluate(extraction.get("answers", {}), age_assessment=extraction.get("age_assessment", "UNKNOWN"),
+                      safeguarding=bool(extraction.get("safeguarding_flag")),
+                      minimum_wage_etb=getattr(company, "minimum_wage_etb", None))
+    return result["overall_verdict"], result["clauses"]
+
+
+def _persist_call_response(
+    *,
+    call_id: str,
+    batch_id: str,
+    worker_id: str,
+    transcript: str | None,
+    transcript_turns: list[dict[str, Any]],
+    language: str | None,
+    audio_url: str | None,
+    extraction: dict[str, Any],
+    annotation: str,
+    kpi_clauses: dict[str, Any],
+) -> Path:
+    """Write the completed-call handoff before inserting its DB projection.
+
+    The filename contains the provider call ID and UTC save timestamp, making
+    completed calls easy to sort and find. Duplicate webhooks reuse the first
+    artifact for that call rather than creating another file.
+    This is an operational/debug artifact, not a public export.
+    """
+
+    safe_call_id = re.sub(r"[^A-Za-z0-9_.-]", "_", call_id)
+    directory = Path(settings.callwise_response_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    existing = sorted(directory.glob(f"{safe_call_id}_*.json"))
+    if existing:
+        path = existing[0]
+    else:
+        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        path = directory / f"{safe_call_id}_{timestamp}.json"
+    payload = {
+        "schema_version": "callwise-response-v1",
+        "saved_at": datetime.now(UTC).isoformat(),
+        "call_id": call_id,
+        "batch_id": batch_id,
+        "worker_id": worker_id,
+        "language": language,
+        "transcript": transcript,
+        "transcript_turns": transcript_turns,
+        "audio_url": audio_url,
+        "privacy_redacted": not extraction.get("consent", False),
+        "extraction": extraction,
+        "good_job_annotation": annotation,
+        "good_job": {
+            "value": annotation == "CONFIRMED_GOOD_JOB",
+            "status": annotation.lower(),
+            "counted": annotation == "CONFIRMED_GOOD_JOB" and not extraction.get("excluded", False),
+            "source": "deterministic_callwise_rules",
+        },
+        "kpi_clauses": kpi_clauses,
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
+    logger.info("Callwise response JSON saved call_id=%s path=%s", call_id, path)
+    return path
 
 
 # -- thread plumbing ------------------------------------------------------- #
@@ -145,8 +229,34 @@ def current_round(db: Session, company_id: str) -> InterviewBatch | None:
     return BatchRepository(db).newest_for_company(company_id)
 
 
+def create_batch(
+    db: Session,
+    title: str = "Callwise validation round",
+    language: str = "am",
+) -> InterviewBatch:
+    """Create a Callwise round for the default internal company.
+
+    This is the programmatic entry point used by fixtures and import jobs. The
+    production UI uses the company-scoped thread, but both paths create the same
+    fixed questionnaire and the same persisted entities.
+    """
+
+    company = ensure_company(db)
+    batch = open_round(db, company, title=title)
+    if language and language != batch.language:
+        BatchRepository(db).update(batch, {"language": language})
+    _say(
+        db,
+        company.company_id,
+        "Upload the employee CSV. The fixed Callwise KPI questions are already configured; nobody is called until you confirm.",
+        payload={"kind": "batch_ready", "batch_id": batch.batch_id},
+        batch_id=batch.batch_id,
+    )
+    return batch
+
+
 def open_round(db: Session, company: Employer, title: str | None = None) -> InterviewBatch:
-    """Start a round. Called when questions are set, never by a button."""
+    """Start a round with the fixed Callwise KPI questionnaire."""
 
     existing = len(BatchRepository(db).for_company(company.company_id))
     batch = InterviewBatch(
@@ -154,7 +264,7 @@ def open_round(db: Session, company: Employer, title: str | None = None) -> Inte
         company_id=company.company_id,
         title=(title or f"Round {existing + 1}")[:255],
         language=_company_language(db, company),
-        questions=[],
+        questions=questions_module.fixed_question_set(),
         categories={},
         status=DRAFT,
         retries=schedule_rules.DEFAULT_RETRIES,
@@ -196,6 +306,29 @@ def _header_value(row: dict[str, str], candidates: tuple[str, ...]) -> str:
     return ""
 
 
+def _parse_date(value: str) -> date | None:
+    try:
+        return date.fromisoformat(value.strip()) if value.strip() else None
+    except ValueError:
+        return None
+
+
+def _parse_yes(value: str) -> bool:
+    return value.strip().lower() in {"yes", "y", "true", "1"}
+
+
+def _parse_followup(value: str) -> tuple[bool, date | None, str | None]:
+    """Parse ``yes;YYYY-MM-DD;form`` without treating incomplete consent as yes."""
+    parts = [part.strip() for part in (value or "").split(";")]
+    if len(parts) < 2 or parts[0].lower() != "yes":
+        return False, None, None
+    recorded = _parse_date(parts[1])
+    source = parts[2].lower() if len(parts) > 2 else None
+    if recorded is None or source not in {"written", "verbal", "registration_form"}:
+        return False, recorded, source
+    return True, recorded, source
+
+
 def import_company_csv(db: Session, company: Employer, content: bytes) -> dict[str, Any]:
     """Read a name/contact CSV into this company's list of people.
 
@@ -207,6 +340,7 @@ def import_company_csv(db: Session, company: Employer, content: bytes) -> dict[s
 
     rows = list(_csv_rows(content))
     headers = {(name or "").strip().lower().replace(" ", "_") for name in (rows[0].keys() if rows else [])}
+    modern = bool(headers & set(BENEFICIARY_HEADERS))
     if rows and not headers & set(NAME_HEADERS):
         raise ValueError("the file needs a column of names")
     if rows and not headers & set(CONTACT_HEADERS):
@@ -227,6 +361,10 @@ def import_company_csv(db: Session, company: Employer, content: bytes) -> dict[s
     for row_number, row in enumerate(rows, start=2):
         name = _header_value(row, NAME_HEADERS)
         contact = _header_value(row, CONTACT_HEADERS)
+        beneficiary_id = _header_value(row, BENEFICIARY_HEADERS)
+        if modern and not beneficiary_id:
+            skipped.append(f"row {row_number} has no beneficiary_id")
+            continue
         if not name or not contact:
             skipped.append(f"row {row_number} has no name or no number")
             continue
@@ -239,6 +377,101 @@ def import_company_csv(db: Session, company: Employer, content: bytes) -> dict[s
             continue
         seen.add(key)
 
+        if modern and not _PHONE_E164.fullmatch(contact.strip()):
+            skipped.append(f"row {row_number}: {name} has an invalid phone_e164; use +2519XXXXXXXX")
+            continue
+        preferred = _header_value(row, ("preferred_language", "language")) or language
+        gender = _header_value(row, GENDER_HEADERS).upper()
+        placement_status = _header_value(row, PLACEMENT_STATUS_HEADERS).lower()
+        training_end = _parse_date(_header_value(row, TRAINING_END_HEADERS))
+        consent_value = _header_value(row, FOLLOWUP_HEADERS)
+        consent, consent_date, consent_source = _parse_followup(consent_value) if modern else (_parse_yes(consent_value), None, None)
+        if modern and preferred not in ALLOWED_LANGUAGES:
+            skipped.append(f"row {row_number}: unsupported preferred_language {preferred!r}")
+            continue
+        if modern and gender not in ALLOWED_GENDERS:
+            skipped.append(f"row {row_number}: gender must be F or M")
+            continue
+        if modern and placement_status not in ALLOWED_PLACEMENT:
+            skipped.append(f"row {row_number}: invalid placement status")
+            continue
+        if modern and (training_end is None or not date(2026, 3, 1) <= training_end <= date(2026, 5, 31)):
+            skipped.append(f"row {row_number}: training_end_date must be between 2026-03-01 and 2026-05-31")
+            continue
+        if modern and not consent:
+            skipped.append(f"row {row_number}: no complete follow-up consent")
+            continue
+
+        found = existing.get(key)
+        worker_id = beneficiary_id if modern else (found.worker_id if found else f"w_{uuid4().hex[:10]}")
+        gender = _header_value(row, GENDER_HEADERS)
+        age_band = _header_value(row, AGE_BAND_HEADERS)
+        cohort_id = _header_value(row, COHORT_HEADERS)
+        training_end = training_end or _parse_date(_header_value(row, TRAINING_END_HEADERS))
+        placement_status = placement_status or _header_value(row, PLACEMENT_STATUS_HEADERS)
+        placement_date = _parse_date(_header_value(row, PLACEMENT_DATE_HEADERS))
+        followup = consent
+        person = repository.upsert(
+            {
+                "worker_id": worker_id,
+                "name": name,
+                "company_id": company.company_id,
+                "phone_number": contact,
+                "preferred_language": preferred,
+                "gender": gender or (found.gender if found else None),
+                "age_band": age_band or (found.age_band if found else None),
+                "training_cohort_id": cohort_id or (found.training_cohort_id if found else None),
+                "training_end_date": training_end or (found.training_end_date if found else None),
+                "placement_status": placement_status or (found.placement_status if found else None),
+                "placement_date": placement_date or (found.placement_date if found else None),
+                "consent_to_followup_contact": followup or (found.consent_to_followup_contact if found else False),
+                "consent_recorded_at": consent_date or (found.consent_recorded_at if found else None),
+                "consent_source": consent_source or (found.consent_source if found else None),
+                "notes": _header_value(row, NOTES_HEADERS) or (found.notes if found else None),
+                "employer_claims": found.employer_claims if found else {},
+                "is_active": True,
+            }
+        )
+        existing[key] = person
+        entry = {"worker_id": worker_id, "name": name, "phone_number": contact}
+        (updated if found else added).append(entry)
+
+    return {
+        "added": added,
+        "updated": updated,
+        "skipped": skipped,
+        "modern_contract": modern,
+        "eligible": len(added) + len(updated),
+        "total": len(repository.for_company(company.company_id)),
+    }
+
+
+def add_company_people(
+    db: Session, company: Employer, people: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Add a small roster update supplied directly in the chat.
+
+    Phone number is the stable identity within a company, matching CSV import
+    behavior. Existing numbers are updated rather than duplicated.
+    """
+
+    repository = BeneficiaryRepository(db)
+    existing = {
+        normalize_phone(person.phone_number): person
+        for person in repository.for_company(company.company_id)
+    }
+    added: list[dict[str, str]] = []
+    updated: list[dict[str, str]] = []
+    skipped: list[str] = []
+    language = _company_language(db, company)
+
+    for item in people:
+        name = str(item.get("name") or "").strip()
+        contact = str(item.get("phone_number") or item.get("contact") or "").strip()
+        key = normalize_phone(contact)
+        if not name or not key:
+            skipped.append("an entry was missing a name or usable phone number")
+            continue
         found = existing.get(key)
         worker_id = found.worker_id if found else f"w_{uuid4().hex[:10]}"
         person = repository.upsert(
@@ -280,13 +513,17 @@ def already_called(db: Session, company_id: str) -> set[str]:
     return reached
 
 
-def roster(db: Session, company_id: str, batch: InterviewBatch | None = None) -> list[dict[str, Any]]:
+def roster(db: Session, company_id: str | InterviewBatch, batch: InterviewBatch | None = None) -> list[dict[str, Any]]:
     """Everyone on the company's list, with what has happened to them.
 
     Exclusions and answers are read across every round: somebody excluded as a
     minor in round one must stay excluded in round four, and there is no version
     of that rule that should depend on which round is open.
     """
+
+    if isinstance(company_id, InterviewBatch):
+        batch = company_id
+        company_id = batch.company_id
 
     answers: dict[str, WorkerAnswers] = {}
     answer_repository = WorkerAnswersRepository(db)
@@ -315,6 +552,11 @@ def roster(db: Session, company_id: str, batch: InterviewBatch | None = None) ->
                 "name": person.name or person.worker_id,
                 "phone_number": person.phone_number,
                 "preferred_language": person.preferred_language,
+                "gender": person.gender,
+                "age_band": person.age_band,
+                "training_cohort_id": person.training_cohort_id,
+                "placement_status": person.placement_status,
+                "consent_to_followup_contact": person.consent_to_followup_contact,
                 "selected": target is not None and target.status == "selected",
                 "call_status": target.status if target else None,
                 "call_id": target.call_id if target else None,
@@ -345,6 +587,10 @@ def records_for(db: Session, batch: InterviewBatch) -> list[dict[str, Any]]:
             "consent": bool(record.consent),
             "excluded": bool(record.excluded),
             "exclusion_reason": record.exclusion_reason,
+            "disposition": record.disposition,
+            "attempts": record.attempts,
+            "good_job_annotation": record.good_job_annotation,
+            "kpi_clauses": record.kpi_clauses or {},
         }
         for record in WorkerAnswersRepository(db).for_batch(batch.batch_id)
     ]
@@ -371,6 +617,12 @@ def company_listing(db: Session) -> list[dict[str, Any]]:
         messages = message_repository.for_company(company.company_id)
         batch = current_round(db, company.company_id)
         status = batch.status if batch is not None else DRAFT
+        if batch is not None and status == CALLING:
+            targets = BatchTargetRepository(db).for_batch(batch.batch_id)
+            if targets and not any(target.status == "dialing" for target in targets) and any(
+                target.status == "retry_wait" for target in targets
+            ):
+                status = SELECTED
         last = messages[-1] if messages else None
         rows.append(
             {
@@ -397,14 +649,30 @@ def company_thread(db: Session, company_id: str) -> dict[str, Any]:
     batch = current_round(db, company_id)
     people = roster(db, company_id, batch)
     targets = BatchTargetRepository(db).for_batch(batch.batch_id) if batch is not None else []
+    # A webhook can move the provider call to retry_wait after the round was
+    # marked calling. Derive the display state from the target lifecycle so an
+    # already-failed call is never shown as still in progress.
+    display_status = batch.status if batch is not None else DRAFT
+    if (
+        batch is not None
+        and display_status == CALLING
+        and targets
+        and not any(target.status == "dialing" for target in targets)
+        and any(target.status == "retry_wait" for target in targets)
+    ):
+        display_status = SELECTED
     return {
         "company_id": company.company_id,
         "name": company.name,
         "timezone": company.timezone,
         "clock_convention": company.clock_convention,
+        "settings": {
+            "minimum_wage_etb": company.minimum_wage_etb,
+            "small_cell_threshold": company.small_cell_threshold,
+        },
         "language": batch.language if batch is not None else "am",
-        "status": batch.status if batch is not None else DRAFT,
-        "waiting_on": WAITING_ON.get(batch.status if batch is not None else DRAFT, ""),
+        "status": display_status,
+        "waiting_on": WAITING_ON.get(display_status, ""),
         "people": people,
         "rounds": len(BatchRepository(db).for_company(company_id)),
         "round": None
@@ -434,6 +702,56 @@ def company_thread(db: Session, company_id: str) -> dict[str, Any]:
     }
 
 
+def batch_detail(db: Session, batch_id: str) -> dict[str, Any]:
+    """Return a batch-shaped view for internal API consumers."""
+
+    batch = BatchRepository(db).get(batch_id)
+    if batch is None:
+        raise ValueError(f"Batch not found: {batch_id}")
+    payload = company_thread(db, batch.company_id)
+    payload["batch_id"] = batch.batch_id
+    payload["title"] = batch.title
+    payload["roster"] = payload.get("people", [])
+    return payload
+
+
+def debug_snapshot(db: Session, batch_id: str) -> dict[str, Any]:
+    """Expose the deterministic stored pipeline state for local validation."""
+
+    batch = BatchRepository(db).get(batch_id)
+    if batch is None:
+        raise ValueError(f"Batch not found: {batch_id}")
+    return {
+        "batch": batch_detail(db, batch_id),
+        "records": records_for(db, batch),
+        "summary": batch_summary(db, batch),
+    }
+
+
+def replay_fixture(db: Session, batch_id: str, worker_id: str, fixture: str) -> WorkerAnswers:
+    """Replay a local transcript fixture through the same completion path."""
+
+    from pathlib import Path
+
+    batch = BatchRepository(db).get(batch_id)
+    if batch is None:
+        raise ValueError(f"Batch not found: {batch_id}")
+    path = Path("tests/fixtures/transcripts") / fixture
+    if path.suffix != ".json" or not path.exists():
+        raise ValueError("fixture not found")
+    payload = __import__("json").loads(path.read_text(encoding="utf-8"))
+    turns = payload.get("turns") if isinstance(payload, dict) else None
+    from app.services.teleexpert_service import transcript_from_turns
+
+    transcript = transcript_from_turns(turns) if isinstance(turns, list) else str(payload.get("transcript", ""))
+    target = next((item for item in BatchTargetRepository(db).for_batch(batch_id) if item.worker_id == worker_id), None)
+    if target is None:
+        target = BatchTarget(batch_id=batch_id, worker_id=worker_id, call_id=f"fixture_{uuid4().hex}", status="dialing")
+        db.add(target)
+        db.commit()
+    return process_batch_call(db, target.call_id, transcript, payload.get("language") if isinstance(payload, dict) else None)
+
+
 # -- questions ------------------------------------------------------------- #
 
 
@@ -443,20 +761,15 @@ def set_questions(
     typed: list[str],
     intelligence: BatchIntelligence | None = None,
 ) -> list[dict[str, Any]]:
-    """Record the questions for a round, with age asked first regardless.
+    """Return the fixed questionnaire; administrator text cannot replace it.
 
-    Turning "what is ur wage?" into a sentence somebody can be asked down a
-    telephone is a language job, so the model rewrites each question while code
-    holds the count and the order fixed. What the administrator typed is kept
-    beside the rewrite, so the thread can show both and nothing is changed behind
-    their back.
+    ``typed`` remains in the signature temporarily so existing chat actions do
+    not crash while the UI is migrated. It is intentionally ignored: allowing
+    free-form questions would change the KPI schema and produce incomparable
+    batches.
     """
 
-    parsed = [text.strip() for text in typed if text and text.strip()]
-    if not parsed:
-        return []
-    refined = intelligence.refine_questions(parsed) if intelligence is not None else parsed
-    question_set = questions_module.build_question_set(refined)
+    question_set = questions_module.fixed_question_set()
     BatchRepository(db).update(batch, {"questions": question_set})
     return question_set
 
@@ -530,20 +843,78 @@ def dial_selection(
                     worker_id=person.worker_id,
                     phone_number=person.phone_number,
                     prompt=prompt,
-                    retries=batch.retries,
+                    # Application-level retries are scheduled at least 24h
+                    # apart; TeleExpert must not perform hidden rapid retries.
+                    retries=0,
                     answer_timeout_seconds=settings.teleexpert_answer_timeout_seconds,
                 ),
                 idempotency_key=f"{batch.batch_id}:{person.worker_id}",
             )
-        except (TeleExpertError, ValueError):
+        except (TeleExpertError, ValueError) as exc:
             logger.exception("Dialing failed for %s", person.worker_id)
-            target_repository.update(target, {"status": "failed"})
+            # No provider call exists in this branch. Keep the target retryable
+            # and retain the reason in the batch target so the UI can explain
+            # what happened instead of leaving the whole round stuck in
+            # ``calling`` forever.
+            target_repository.update(
+                target,
+                {"status": "failed", "failure_reason": str(exc)[:1000]},
+            )
             failed.append(person.name or person.worker_id)
             continue
-        target_repository.update(target, {"call_id": call.call_id, "status": "dialing"})
+        if call.status in {"failed", "cancelled"}:
+            # A provider response can be HTTP-successful while still returning
+            # a terminal rejection. Do not report that as a placed call.
+            target_repository.update(
+                target,
+                {
+                    "call_id": call.call_id,
+                    "status": "failed",
+                    "failure_reason": getattr(call, "failure_reason", None),
+                },
+            )
+            failed.append(person.name or person.worker_id)
+            continue
+        # TeleExpert accepts asynchronously (normally with ``queued``). The
+        # local target uses ``dialing`` for every accepted in-flight call; the
+        # provider's exact state remains on TeleExpertCall.status.
+        target_repository.update(target, {"call_id": call.call_id, "status": "dialing", "attempts": (target.attempts or 0) + 1})
+        db.add(CallAttempt(
+            attempt_id=f"attempt_{uuid4().hex}", batch_id=batch.batch_id,
+            worker_id=person.worker_id, call_id=call.call_id,
+            attempt_number=target.attempts, provider_state=call.status,
+        ))
+        db.commit()
         dialed.append(person.name or person.worker_id)
 
-    BatchRepository(db).update(batch, {"status": CALLING, "scheduled_at": None})
+    # ``calling`` means at least one provider call is genuinely in flight.
+    # If every submission failed before a call was created, leave the round in
+    # ``selected`` so the administrator can retry without re-uploading the
+    # roster. The failed target is re-armed below; its failure reason remains
+    # in the call/batch history where applicable.
+    if dialed:
+        next_status = CALLING
+    else:
+        next_status = SELECTED if failed else READY
+        if failed:
+            for target in target_repository.for_batch(batch.batch_id):
+                if target.status == "failed":
+                    target_repository.update(
+                        target,
+                        {
+                            # A failed provider call is retained in
+                            # TeleExpertCall/CallAttempt history. Clearing the
+                            # target link lets the next confirmed selection
+                            # create a fresh provider call for the same worker.
+                            "call_id": None,
+                            "status": "selected",
+                            "failure_reason": target.failure_reason,
+                        },
+                    )
+    BatchRepository(db).update(
+        batch,
+        {"status": next_status, "scheduled_at": None, "started_at": batch.started_at or datetime.utcnow()},
+    )
     return {"dialed": dialed, "failed": failed}
 
 
@@ -602,11 +973,33 @@ def batch_result_pending(db: Session, call_id: str) -> bool:
     return target is not None and target.status not in TERMINAL_TARGET_STATUSES
 
 
+def _disposition_for(extraction: dict[str, Any]) -> str:
+    """Distinguish a genuinely partial conversation from a full completion."""
+    if extraction.get("excluded"):
+        return "stopped" if extraction.get("interview_stopped") else "excluded"
+    answers = extraction.get("answers") or {}
+    states = [item.get("state") for item in answers.values() if isinstance(item, dict)]
+    if extraction.get("interview_stopped") or ("STATED" in states and "NOT_ASKED" in states):
+        return "partial"
+    return "completed"
+
+
+def _finish_attempt(db: Session, call_id: str, *, disposition: str, reason: str | None = None) -> None:
+    attempt = db.scalars(select(CallAttempt).where(CallAttempt.call_id == call_id).order_by(CallAttempt.attempt_number.desc())).first()
+    if attempt is not None:
+        attempt.ended_at = datetime.utcnow()
+        attempt.disposition = disposition
+        attempt.failure_reason = reason
+        db.commit()
+
+
 def process_batch_call(
     db: Session,
     call_id: str,
     transcript: str,
     language: str | None = None,
+    audio_url: str | None = None,
+    transcript_turns: list[dict[str, Any]] | None = None,
     intelligence: BatchIntelligence | None = None,
 ) -> WorkerAnswers:
     """Read one finished interview into answers, then finish the round if it can."""
@@ -620,7 +1013,49 @@ def process_batch_call(
         raise ValueError(f"Round not found: {target.batch_id}")
 
     engine = intelligence or build_batch_intelligence()
+    existing_history = WorkerAnswerRecordRepository(db).by_call(call_id)
+    if existing_history is not None:
+        current = WorkerAnswersRepository(db).get((batch.batch_id, target.worker_id))
+        if current is not None:
+            return current
     extraction = engine.extract_answers(transcript, target.worker_id, batch.questions or [])
+    company = db.get(Employer, batch.company_id)
+    annotation, kpi_clauses = _good_job_annotation(extraction, company)
+    disposition = _disposition_for(extraction)
+
+    # The consent script promises deletion of the whole call when the
+    # respondent declines or voids recording.  Keep only the minimum
+    # operational/audit fields needed to explain exclusion; never persist the
+    # raw transcript, speaker turns, or provider audio URL in that case.
+    consented = bool(extraction.get("consent"))
+    retained_transcript = transcript if consented else None
+    retained_turns = (transcript_turns or []) if consented else []
+    retained_audio_url = audio_url if consented else None
+    stored_extraction = dict(extraction)
+    stored_extraction["transcript"] = retained_transcript
+    _persist_call_response(
+        call_id=call_id,
+        batch_id=batch.batch_id,
+        worker_id=target.worker_id,
+        transcript=retained_transcript,
+        transcript_turns=retained_turns,
+        language=extraction["language"] or language,
+        audio_url=retained_audio_url,
+        extraction=stored_extraction,
+        annotation=annotation,
+        kpi_clauses=kpi_clauses,
+    )
+    logger.info(
+        "Callwise analysis completed call_id=%s worker_id=%s disposition=%s excluded=%s "
+        "age_assessment=%s answers=%s kpi=%s",
+        call_id,
+        target.worker_id,
+        disposition,
+        extraction.get("excluded"),
+        extraction.get("age_assessment"),
+        json.dumps(extraction.get("answers") or {}, ensure_ascii=False, default=str),
+        json.dumps(kpi_clauses or {}, ensure_ascii=False, default=str),
+    )
     record = WorkerAnswersRepository(db).upsert(
         {
             "batch_id": batch.batch_id,
@@ -628,12 +1063,57 @@ def process_batch_call(
             "call_id": call_id,
             "answers": extraction["answers"],
             "consent": extraction["consent"],
+            "consent_json": extraction.get("consent_details", {}),
             "language": extraction["language"] or language,
-            "transcript": transcript,
+            "transcript": retained_transcript,
+            "transcript_turns": retained_turns,
+            "audio_url": retained_audio_url,
+            "disposition": disposition,
+            "attempts": target.attempts or 1,
+            "good_job_annotation": annotation,
+            "kpi_clauses": kpi_clauses,
             "excluded": extraction["excluded"],
             "exclusion_reason": extraction["exclusion_reason"],
         }
     )
+    # Preserve every completed call. The projection above is used for current
+    # counts; this append-only row prevents a later interview from replacing
+    # the earlier transcript or answer set.
+    history = WorkerAnswerRecord(
+        answer_record_id=f"answer_{uuid4().hex}",
+        batch_id=batch.batch_id,
+        worker_id=target.worker_id,
+        call_id=call_id,
+        answers=extraction["answers"],
+        consent=extraction["consent"],
+        consent_json=extraction.get("consent_details", {}),
+        language=extraction["language"] or language,
+        transcript=retained_transcript,
+        transcript_turns=retained_turns,
+        audio_url=retained_audio_url,
+        disposition=disposition,
+        attempts=target.attempts or 1,
+        good_job_annotation=annotation,
+        kpi_clauses=kpi_clauses,
+        excluded=extraction["excluded"],
+        exclusion_reason=extraction["exclusion_reason"],
+    )
+    db.add(history)
+    try:
+        db.commit()
+    except IntegrityError:
+        # TeleExpert may retry a webhook, and two delivery workers can race
+        # before either sees the existing immutable record. Keep the first
+        # record and treat the second delivery as an idempotent success.
+        db.rollback()
+        existing = WorkerAnswerRecordRepository(db).by_call(call_id)
+        if existing is not None:
+            current = WorkerAnswersRepository(db).get((batch.batch_id, target.worker_id))
+            if current is not None:
+                logger.info("Ignored duplicate completed call call_id=%s", call_id)
+                return current
+        raise
+    _finish_attempt(db, call_id, disposition=disposition, reason=record.exclusion_reason)
     target_repository.update(target, {"status": "completed"})
 
     person = BeneficiaryRepository(db).get(target.worker_id)
@@ -665,10 +1145,42 @@ def mark_call_failed(db: Session, call_id: str, reason: str | None = None) -> No
     target = target_repository.by_call(call_id)
     if target is None or target.status in TERMINAL_TARGET_STATUSES:
         return
-    target_repository.update(target, {"status": "failed"})
     batch = BatchRepository(db).get(target.batch_id)
     if batch is None:
         return
+    attempts = target.attempts or 1
+    # ``retries`` is the number of retries after the initial attempt. Therefore
+    # retries=0 means no retry, retries=1 permits attempt 2, and so on.
+    if attempts <= max(0, batch.retries):
+        next_attempt = datetime.utcnow().replace(microsecond=0)
+        from datetime import timedelta
+
+        target_repository.update(
+            target,
+            {
+                "status": "retry_wait",
+                "next_attempt_at": next_attempt + timedelta(hours=24),
+                "failure_reason": reason or "Call did not connect",
+            },
+        )
+        _finish_attempt(db, call_id, disposition="no_answer", reason=reason or "Call did not connect")
+        person = BeneficiaryRepository(db).get(target.worker_id)
+        who = person.name if person and person.name else target.worker_id
+        _say(
+            db,
+            batch.company_id,
+            f"The call to {who} did not connect. I will retry after 24 hours (attempt {attempts + 1} of {batch.retries}).",
+            {"kind": "retry_scheduled", "worker_id": target.worker_id, "next_attempt_at": target.next_attempt_at.isoformat()},
+            batch_id=batch.batch_id,
+        )
+        # The provider call is terminal even though this worker has a future
+        # retry. The round must not remain visually stuck in ``calling``; the
+        # admin may explicitly start a fresh round immediately if needed.
+        BatchRepository(db).update(batch, {"status": SELECTED})
+        return
+
+    target_repository.update(target, {"status": "failed", "failure_reason": reason})
+    _finish_attempt(db, call_id, disposition="no_answer", reason=reason or "Call did not connect")
     person = BeneficiaryRepository(db).get(target.worker_id)
     who = person.name if person and person.name else target.worker_id
     _say(
@@ -679,6 +1191,48 @@ def mark_call_failed(db: Session, call_id: str, reason: str | None = None) -> No
         batch_id=batch.batch_id,
     )
     finalize_if_complete(db, batch, None)
+
+
+def run_due_retries(db: Session, intelligence: BatchIntelligence | None = None) -> list[str]:
+    """Place the next application-level attempt after the 24-hour wait."""
+
+    retried: list[str] = []
+    people_cache: dict[str, Any] = {}
+    for target in BatchTargetRepository(db).due_retries(datetime.utcnow()):
+        batch = BatchRepository(db).get(target.batch_id)
+        if batch is None:
+            continue
+        person = people_cache.get(target.worker_id) or BeneficiaryRepository(db).get(target.worker_id)
+        if person is None:
+            continue
+        people_cache[target.worker_id] = person
+        engine = intelligence or build_batch_intelligence()
+        prompt = engine.interview_prompt(person, batch.questions or [], language=batch.language, programme_name="beSingularity Callwise validation")
+        try:
+            call = submit_teleexpert_call(
+                db,
+                CallCreate(
+                    worker_id=person.worker_id,
+                    phone_number=person.phone_number,
+                    prompt=prompt,
+                    retries=0,
+                    answer_timeout_seconds=settings.teleexpert_answer_timeout_seconds,
+                ),
+                idempotency_key=f"{batch.batch_id}:{person.worker_id}:attempt:{(target.attempts or 0) + 1}",
+            )
+        except (TeleExpertError, ValueError):
+            logger.exception("Retry dialing failed for %s", person.worker_id)
+            continue
+        target_repository = BatchTargetRepository(db)
+        target_repository.update(target, {"call_id": call.call_id, "status": "dialing", "attempts": (target.attempts or 0) + 1, "next_attempt_at": None})
+        db.add(CallAttempt(
+            attempt_id=f"attempt_{uuid4().hex}", batch_id=batch.batch_id,
+            worker_id=person.worker_id, call_id=call.call_id,
+            attempt_number=target.attempts, provider_state=call.status,
+        ))
+        db.commit()
+        retried.append(target.worker_id)
+    return retried
 
 
 def finalize_if_complete(
@@ -716,7 +1270,10 @@ def finalize_if_complete(
     else:
         categories = {}
 
-    BatchRepository(db).update(batch, {"categories": categories, "status": COMPLETE})
+    BatchRepository(db).update(
+        batch,
+        {"categories": categories, "status": COMPLETE, "completed_at": datetime.utcnow()},
+    )
     summary = batch_summary(db, batch)
     _say(
         db,
@@ -835,10 +1392,6 @@ class Outcome:
 def _tool_set_questions(
     db: Session, company: Employer, arguments: dict[str, Any], engine: BatchIntelligence
 ) -> Outcome:
-    typed = arguments.get("questions") or []
-    if not typed:
-        return Outcome({"ok": False, "error": "no questions were given"})
-
     batch = current_round(db, company.company_id)
     # A round that has already selected or called people is finished being edited.
     # Retyping questions then means a new round over the same list of people,
@@ -846,28 +1399,41 @@ def _tool_set_questions(
     if batch is None or batch.status not in {DRAFT, READY}:
         batch = open_round(db, company)
 
-    question_set = set_questions(db, batch, typed, engine)
-    if not question_set:
-        return Outcome({"ok": False, "error": "none of that parsed as a question"})
+    question_set = set_questions(db, batch, [], engine)
 
     people = roster(db, company.company_id, batch)
     BatchRepository(db).update(batch, {"status": READY if people else DRAFT})
-    rewritten = [
-        {"typed": item["original"], "asked": item["text"]}
-        for item in question_set
-        if item.get("original") and item["original"] != item["text"]
-    ]
     return Outcome(
         {
             "ok": True,
             "questions": [item["text"] for item in question_set],
             "count": len(question_set),
             "age_asked_first": True,
-            "rewritten": rewritten,
+            "fixed_questionnaire": True,
             "people_on_list": len(people),
         },
         card={"kind": "questions", "questions": question_set},
         batch_id=batch.batch_id,
+    )
+
+
+def _tool_add_people(
+    db: Session, company: Employer, arguments: dict[str, Any], engine: BatchIntelligence
+) -> Outcome:
+    people = arguments.get("people") or []
+    if not isinstance(people, list) or not people:
+        return Outcome({"ok": False, "error": "no employees were provided"})
+    result = add_company_people(db, company, people)
+    changed = result["added"] + result["updated"]
+    return Outcome(
+        {
+            "ok": bool(changed),
+            "added": len(result["added"]),
+            "updated": len(result["updated"]),
+            "skipped": result["skipped"],
+            "total": result["total"],
+        },
+        card={"kind": "roster", "people": changed, "skipped": result["skipped"], "total": result["total"]},
     )
 
 
@@ -1075,6 +1641,7 @@ def _tool_speak(
 Executor = Callable[[Session, Employer, dict[str, Any], BatchIntelligence], Outcome]
 
 EXECUTORS: dict[str, Executor] = {
+    "add_people": _tool_add_people,
     "set_questions": _tool_set_questions,
     "select_people": _tool_select_people,
     "ask_schedule": _tool_ask_schedule,
@@ -1090,7 +1657,7 @@ EXECUTORS: dict[str, Executor] = {
 #: that keeps selecting people would otherwise loop against a paid API, and each
 #: repeat would replace the previous draw.
 ACTING_TOOLS = frozenset(
-    {"set_questions", "select_people", "schedule_calls", "dial_now", "cancel_selection", "set_language"}
+    {"add_people", "set_questions", "select_people", "schedule_calls", "dial_now", "cancel_selection", "set_language"}
 )
 
 
@@ -1124,13 +1691,21 @@ def handle_upload(
         lines.append("All of them were already on the list, so I updated their details.")
     if result["skipped"]:
         lines.append(f"{len(result['skipped'])} row(s) left out: " + "; ".join(result["skipped"]) + ".")
-    lines.append(
-        "Now send me the questions."
-        if batch is None or not batch.questions
-        else "Tell me who to call."
+    if batch is None:
+        batch = open_round(db, company)
+    # Keep an audit fingerprint and row counts, but never embed the source CSV
+    # itself in the database. This supports the documented retention policy.
+    BatchRepository(db).update(
+        batch,
+        {
+            "source_checksum": hashlib.sha256(content).hexdigest(),
+            "source_row_count": len(list(_csv_rows(content))),
+            "eligible_row_count": result["eligible"],
+        },
     )
+    lines.append("The fixed Callwise KPI questionnaire is ready. Tell me who to call.")
 
-    if batch is not None and batch.questions and batch.status == DRAFT:
+    if batch.status == DRAFT:
         BatchRepository(db).update(batch, {"status": READY})
 
     return [
@@ -1176,6 +1751,11 @@ def handle_message(
     sentence, and the deterministic card is attached to it.
     """
 
+    # Older internal callers passed a batch id. Resolve it here while keeping
+    # the public product contract company-scoped (one chat thread per company).
+    batch_argument = BatchRepository(db).get(company_id)
+    if batch_argument is not None:
+        company_id = batch_argument.company_id
     company = ensure_company(db, company_id)
     if not text or not text.strip():
         raise ValueError("Type something first")
@@ -1268,6 +1848,7 @@ def handle_message(
 
 __all__ = [
     "ACTING_TOOLS",
+    "add_company_people",
     "CALLING",
     "COMPLETE",
     "DEFAULT_COMPANY_ID",
@@ -1282,6 +1863,9 @@ __all__ = [
     "already_called",
     "batch_summary",
     "batch_result_pending",
+    "batch_detail",
+    "create_batch",
+    "debug_snapshot",
     "build_context",
     "company_listing",
     "company_thread",
@@ -1299,8 +1883,10 @@ __all__ = [
     "open_round",
     "process_batch_call",
     "records_for",
+    "replay_fixture",
     "roster",
     "run_due_rounds",
+    "run_due_retries",
     "select_targets",
     "set_questions",
 ]

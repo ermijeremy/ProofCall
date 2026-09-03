@@ -20,9 +20,8 @@ it: `rm -rf .venv && python3 -m venv .venv`, then reinstall.
 .venv/bin/python -m pytest -q
 ```
 
-Expect **498 passed, 18 deselected**. This is the check to run before every
-commit. Live tests are excluded automatically by `addopts = -m "not live"` in
-`pytest.ini`, so this never spends money.
+Run the focused Callwise checks below before every commit. Live tests are
+excluded automatically by `addopts = -m "not live"` in `pytest.ini`.
 
 The ~1,570 deprecation warnings all come from `datetime.utcnow()` in Member B's
 models and `app/main.py`'s `on_event`. None come from the intelligence code.
@@ -37,27 +36,24 @@ models and `app/main.py`'s `on_event`. None come from the intelligence code.
 .venv/bin/python -m pytest tests/integration/ -q                # the full chain
 ```
 
-The batch path — admin-typed questions, model-derived categories, the chat — has
-its own modules:
+The Callwise path has its own modules:
 
 ```sh
-.venv/bin/python -m pytest tests/unit/test_questions.py -q      # question set, interview prompt
+.venv/bin/python -m pytest tests/unit/test_callwise_questionnaire.py -q
 .venv/bin/python -m pytest tests/unit/test_categorize.py -q     # pass two: derive, then assign
 .venv/bin/python -m pytest tests/unit/test_selection.py -q      # who gets called
 .venv/bin/python -m pytest tests/unit/test_sampling.py -q       # the draw itself
 .venv/bin/python -m pytest tests/unit/test_analysis.py -q       # counts, and what the model is told
 .venv/bin/python -m pytest tests/unit/test_safeguarding.py -q   # age label to exclusion
-.venv/bin/python -m pytest tests/integration/test_batch_flow.py -q     # CSV to counts to chat
+.venv/bin/python -m pytest tests/integration/test_callwise_pipeline.py -q  # roster to exports
 .venv/bin/python -m pytest tests/integration/test_webhook_layer.py -q  # signatures, replay, the drain
 .venv/bin/python -m pytest tests/integration/test_batch_pages.py -q    # the two rendered pages
 ```
 
 Two tests answer "does the whole thing work".
-`tests/integration/test_engine_pipeline.py` covers the clause path: fixture
-transcript → engine → `CompletedCallResult` → persistence → aggregation.
-`tests/integration/test_batch_flow.py` covers the batch path: CSV → question set
-→ selection → confirmation → demo calls → extraction → categories → counts → one
-chat turn, against a fake provider with no network and no telephone.
+`tests/integration/test_callwise_pipeline.py` covers roster → fixed questionnaire
+→ selection → completion → categorization → aggregate → exports, against an
+offline provider with no network or telephone.
 
 Useful flags: `-v` for one line per test, `-k salary` to select by name, `-x` to
 stop at the first failure, `--tb=short` for shorter tracebacks.
@@ -116,8 +112,8 @@ projects that already used it, and a newer key gets
 
 Then visit `http://127.0.0.1:8000/` (the list of companies) and
 `http://127.0.0.1:8000/docs`. Clicking a company opens its thread at
-`/c/{company_id}`; the "+ Add company" button on the list creates one. The old
-clause-path report is still at `http://127.0.0.1:8000/api/dashboard/programme`.
+`/c/{company_id}`; the "+ Add company" button on the list creates one. The
+active Callwise dashboard is also available at `/api/dashboard`.
 
 The schema changed when the thread became company-scoped: `batch_messages.batch_id`
 is now nullable, and `create_all` does not alter an existing table. A database file
@@ -172,11 +168,12 @@ This is the new path, and it is the demo. Start the app, open
 
 In the thread, in this order:
 
-1. Attach a CSV with a `name` column and a `contact` column. The thread echoes
-   back who is on the list, and reports any row it had to skip.
-2. Type the questions, numbered or one per line — for example
-   `1 - what is ur age? 2 - Do u get enough compensation?`. Age is always asked
-   first whether or not you type it, and a duplicate age question is dropped.
+1. Attach a CSV with `name` and `contact` columns. Optional pilot columns include
+   `preferred_language`, `gender`, `age_band`, `training_cohort_id`,
+   `training_end_date`, `placement_status_per_besingularity`, `placement_date`,
+   and `consent_to_followup_contact`.
+2. The fixed 16-question KPI questionnaire is shown automatically. It cannot be
+   replaced by administrator-authored questions.
 3. Say who to call: `call all of them`, `call half of them at random`,
    `call Abebe and Marta`, or `call the ones we haven't reached yet`. The sample is
    drawn, persisted, and echoed back by name. **No call has been placed yet.**
@@ -190,7 +187,7 @@ end to end. Point it at `scripts/mock_teleexpert.py` to exercise the webhook pat
 and only then at the real service. A placed call cannot be recalled, which is the
 whole reason step 4 exists.
 
-The clause-path dashboard is still there, at `/api/dashboard/programme`.
+The aggregate report and worker-answer exports are available from the Callwise thread.
 
 ## 6. Check no secret is about to be committed
 

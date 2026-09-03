@@ -7,8 +7,7 @@ from threading import Event, Thread
 
 from app.core.config import settings
 from app.db.session import SessionLocal
-from app.services.batch_service import run_due_rounds
-from app.services.interview_service import run_due_interviews
+from app.services.batch_service import run_due_retries, run_due_rounds
 from app.services.call_service import sync_active_calls
 from app.services.teleexpert_service import drain_failed_events
 
@@ -42,16 +41,16 @@ class InterviewScheduler:
         while not self._stop.is_set():
             try:
                 with SessionLocal() as db:
-                    processed = run_due_interviews(db)
                     # Rounds the administrator scheduled in words: "tomorrow at
                     # three". The same poll fires them, because a promise made in
                     # the thread has to be kept without anybody opening the page.
                     rounds = run_due_rounds(db)
+                    retries = run_due_retries(db)
                     synchronized = sync_active_calls(db)
-                    if processed:
-                        logger.info("Automatically processed %s due interview(s)", len(processed))
                     if rounds:
                         logger.info("Automatically dialed %s scheduled round(s)", len(rounds))
+                    if retries:
+                        logger.info("Automatically retried %s Callwise interview(s)", len(retries))
                     if synchronized:
                         logger.info("Automatically synchronized %s active call(s)", len(synchronized))
                 # TeleExpert never redelivers a webhook it has already seen a 2xx

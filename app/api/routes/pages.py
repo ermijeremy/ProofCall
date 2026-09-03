@@ -7,6 +7,7 @@ they are a different product surface with a different audience.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
@@ -39,9 +40,13 @@ def thread(request: Request, company_id: str, db: Session = Depends(get_db)):
     try:
         payload = company_thread(db, company_id)
     except ValueError as exc:
+        # A browser can retain a link from another local checkout/database.
+        # Returning to the list is more useful than rendering a dead thread URL.
+        if str(exc).startswith("No such company:"):
+            return RedirectResponse(url="/", status_code=303)
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return templates.TemplateResponse(
         request=request,
-        name="thread.html",
+        name="round.html",
         context={"thread": payload},
     )

@@ -40,9 +40,109 @@ AGE_QUESTION_TEXT = "How old are you?"
 #: Labels the extraction may return for age. A closed set, so code can act on it.
 AGE_ASSESSMENTS = ("CHILD", "ADULT", "UNKNOWN")
 
+# The Callwise pilot has only two supported spoken languages. A CSV value or
+# inherited company setting must never make the voice agent speak a third one.
+SUPPORTED_SPOKEN_LANGUAGES = {"am", "en"}
+
 #: States an answer may be in. Same vocabulary as the clause path, so the
 #: dashboard and the chat describe a refusal the same way.
 ANSWER_STATES = ("STATED", "REFUSED", "VAGUE", "NOT_ASKED")
+
+# A concrete record shape for the extraction model to imitate. The model must
+# still return the smaller question-driven shape below; the good-job decision
+# is deliberately not delegated to it and is added by deterministic code.
+CALLWISE_RECORD_EXAMPLE = r'''{
+  "record_id": "CW-014",
+  "beneficiary_id": "BSG-2026-0143",
+  "training_cohort_id": "COH-2026-04",
+  "language": "am",
+  "channel": "voice",
+  "interview_date": "2026-09-18",
+  "call": {
+    "attempts": 2,
+    "disposition": "completed",
+    "duration_seconds": 331,
+    "language_switched": false,
+    "cost_usd": 0.28
+  },
+  "consent": {
+    "state": "granted_no_name",
+    "name": false,
+    "quote": true,
+    "voice": false,
+    "photo": false,
+    "voided_at_turn": null,
+    "vulnerable_group_script": false
+  },
+  "employment": {
+    "status": "working",
+    "type": "employee",
+    "sales_related": true,
+    "employer_name": null,
+    "start_date": "2026-04-01",
+    "months_since_start": 5,
+    "hours_per_week": 44,
+    "weeks_per_year": 52,
+    "monthly_take_home_etb": 5200,
+    "deductions_reported": "transport, 300 birr",
+    "continuous": true
+  },
+  "clauses": {
+    "age_ok": {"status": "met", "confidence": 0.9, "evidence_turn": 4, "source": "worker"},
+    "hours_ok": {"status": "met", "confidence": 0.8, "evidence_turn": 12, "source": "worker"},
+    "tenure_ok": {"status": "met", "confidence": 0.75, "evidence_turn": 10, "source": "worker"},
+    "wage_ok": {"status": "met", "confidence": 0.7, "evidence_turn": 14, "source": "worker"},
+    "no_child_labour": {"status": "met", "confidence": 0.9, "evidence_turn": 4, "source": "worker"},
+    "no_forced_labour": {"status": "met", "confidence": 0.8, "evidence_turn": 16, "source": "worker"},
+    "no_discrimination": {"status": "unclear", "confidence": 0.3, "evidence_turn": null, "source": "none"},
+    "association_ok": {"status": "not_met", "confidence": 0.7, "evidence_turn": 18, "source": "worker"},
+    "seasonal_over_6m": {"status": "met", "confidence": 0.6, "evidence_turn": 10, "source": "worker"}
+  },
+  "counted": false,
+  "unresolved_clause_count": 1,
+  "training": {
+    "months_to_first_placement": 2,
+    "training_helped_placement": "a_lot",
+    "satisfaction_1_5": 4,
+    "skills_used": "handling a customer who says no",
+    "other_changes": "pays her own rent since June"
+  },
+  "aggregation_key": {"age_band": "25+", "gender": "F"},
+  "quotes": [{"lang": "am", "text": "..."}],
+  "summary_en": "Employed in a shop since April 2026, sales role, 44 hours a week, 5,200 birr take-home after a transport deduction. No worker representation. Credits the training with the placement.",
+  "flags": ["small_cell_risk"]
+}'''
+
+# The Callwise pilot questionnaire is fixed.  These are deliberately stored as
+# data rather than reconstructed by the chat model so every batch has the same
+# KPI meaning and the exported columns remain stable.
+FIXED_QUESTIONNAIRE: tuple[dict[str, str], ...] = (
+    {"slug": "age_years", "text": "How old are you?", "topic": "age"},
+    {"slug": "employment_status", "text": "Are you working at the moment, in any kind of work, paid by someone or on your own?", "topic": "employment status"},
+    {"slug": "sales_related", "text": "Is that work in sales or dealing with customers?", "topic": "sales work"},
+    {"slug": "employment_type", "text": "Who pays you: a company, your own business, or is it day by day or by season?", "topic": "employment type"},
+    {"slug": "start_date", "text": "Which month and year did you start this work?", "topic": "start date"},
+    {"slug": "employment_continuity", "text": "Since you started, has it run without a break, or were there times with no work?", "topic": "continuity"},
+    {"slug": "working_hours", "text": "In a normal week, how many days do you work, and about how many hours on a day?", "topic": "working hours"},
+    {"slug": "monthly_pay", "text": "In a normal month, how much do you take home? Is anything taken off before you get it?", "topic": "monthly pay"},
+    {"slug": "freedom_to_leave", "text": "Are you free to leave this work whenever you want, with nothing owed and nobody holding your papers?", "topic": "freedom to leave"},
+    {"slug": "equal_treatment", "text": "Are you paid and treated the same as other people doing the same work there?", "topic": "equal treatment"},
+    {"slug": "worker_representation", "text": "Can workers raise a problem together, and is there someone who speaks for them?", "topic": "worker representation"},
+    {"slug": "time_to_first_work", "text": "After the training ended, how long was it until your first work?", "topic": "time to work"},
+    {"slug": "training_help", "text": "How much did the training help you get that work: a lot, some, a little, or not at all?", "topic": "training contribution"},
+    {"slug": "skills_used", "text": "Which part of the training do you use most in your work today?", "topic": "skills used"},
+    {"slug": "satisfaction", "text": "From 1 to 5, how satisfied are you with the training?", "topic": "satisfaction"},
+    {"slug": "other_changes", "text": "What else has changed for you since the training?", "topic": "other changes"},
+)
+
+
+def fixed_question_set() -> list[dict[str, Any]]:
+    """Return a fresh, ordered copy of the pilot KPI questionnaire."""
+
+    return [
+        {"index": index, **question, "original": question["text"]}
+        for index, question in enumerate(FIXED_QUESTIONNAIRE)
+    ]
 
 # Amharic suffixes attach to the noun ("ዕድሜዎ" is "your age"), so a trailing word
 # boundary would only ever match the bare stem. The Latin alternatives keep their
@@ -269,6 +369,8 @@ def build_interview_prompt(
 
     worker_id = _worker_field(worker, "worker_id", "unknown")
     spoken = _worker_field(worker, "preferred_language") or language
+    if str(spoken).lower() not in SUPPORTED_SPOKEN_LANGUAGES:
+        spoken = "am"
     language_name = _language_name(spoken)
     # Bulleted, not numbered: a bare number in the prompt is indistinguishable
     # from a threshold to the test that guards against leaking one, and the order
@@ -282,19 +384,50 @@ def build_interview_prompt(
     return f"""You are conducting a short, voluntary telephone interview for
 {programme_name}. Interview reference: {worker_id}.
 
-Speak {language_name} for the whole call. If the person answers in a different
-language, switch to theirs and stay there.
+LANGUAGE CHECK — THIS MUST BE THE FIRST SPOKEN TURN
+Do not greet, explain the study, mention the training, or ask for consent before
+this sentence. Say exactly:
+  ሰላም። አማርኛ ወይስ English? Amharic or English, whichever is easier for you.
+Then wait for the respondent's choice. If they choose Amharic, speak Amharic
+for every remaining spoken turn. If they choose English, speak English for
+every remaining spoken turn. The planned language ({language_name}) is only a
+fallback when the choice cannot be understood; it is never permission to use a
+third language.
+
+LANGUAGE SAFETY
+You may speak only Amharic or English. Do not repeat, translate, or answer in
+Oromo, Tigrinya, Somali, Arabic, French, Portuguese, Korean, Hindi, or any other
+language, even if the speech recognizer produces words that look like one of
+those languages. If the choice is unclear, repeat the language-choice sentence
+once, in the same Amharic-and-English form, then use the understood choice.
+Never infer a language from a noisy or unrelated caller answer.
 
 WHO YOU ARE
-Say, in your own words, at the start of the call:
-  - you are calling from a team that reviews working conditions;
-  - what they say will not be reported back against their name;
-  - answering is voluntary and they may stop at any time.
-Then ask whether they are willing to answer some questions. If they say no, or
-they sound unwilling, thank them warmly and end the call. Do not persuade them.
+After the language choice, say, in your own words:
+  - you are an independent team calling about the beSingularity training;
+  - the call takes about five minutes and does not affect training or employment;
+  - what they say will not be reported back against their name.
+Do not ask for their name.
 
-FIRST QUESTION, ALWAYS
-Ask their age before anything else, and wait for the answer.
+SPOKEN CONSENT — BEFORE ANY QUESTION
+After the language choice, speak the consent items in that chosen language.
+Translate the meaning naturally; do not read both language versions. Say each
+item separately, then ask the final question and wait:
+  One. I do not need your name. I can write your answers without it.
+  Two. You can stop at any time. Say stop and I stop. Say do not record this and I
+  delete this whole call, including what you already told me.
+  Three. You can answer some questions and leave others. Saying nothing to a
+  question is a normal answer.
+  May I begin?
+Treat silence or an unclear reply as no consent. If they say no, thank them and
+end the call. Never persuade them.
+
+FIRST SUBSTANTIVE QUESTION — ONLY AFTER CONSENT
+Do not ask age, employment, salary, training, or any other interview question
+until the respondent has clearly answered yes to "May I begin?". Ask age as the
+first substantive question after consent, and wait for the answer. Ask for
+consent only once; never repeat the consent request after age or any other
+question.
 If the answer means they are still a child, do not ask a single further
 question. Thank them, say you have nothing more to ask, wish them well, and end
 the call. Do not explain why you are stopping, do not mention any age rule, and
@@ -302,13 +435,25 @@ do not tell them their answer was a problem. Saying so could put them under
 pressure from their employer afterwards.
 
 THE QUESTIONS
-Once age is settled and they are not a child, ask these, in this order, in the
-words they were given to you, adapted only as much as speaking them aloud
-requires:
+Once consent is granted and age is settled and the person is not a child, ask the
+fixed Callwise questionnaire in order. Ask exactly one question, wait for its
+answer, then ask the next. Do not add, remove, merge, or reorder questions:
 {listed}
 
 HOW TO ASK
 Ask one thing at a time, in plain spoken language, and let them finish.
+When the respondent gives a clear answer, do not comment on it, repeat it,
+confirm it, praise it, or say thank you. Move directly to the next question.
+The required rhythm is: ask one question -> wait for the answer -> ask the
+next question. For example, do not say "Thank you, you are twenty-one" after asking
+their age; simply continue with the next question in the selected language.
+After every question, wait silently for up to three seconds. If there is no
+answer, say in the selected language: "If you do not want to answer this
+question, we can continue to the next question." In Amharic say:
+"ይህን ጥያቄ መመለስ ካልፈለጉ ወደሚቀጥለው ጥያቄ መሄድ እንችላለን።"
+Wait silently for up to three more seconds. If there is still no answer, record
+NOT_ASKED and continue. Never treat silence as consent, agreement, refusal, or
+evidence, and never fill a silent answer from context.
 Ask for their own experience, never for the workplace in general.
 Never read a number back to them as if you already knew it, and never suggest
 what a good answer would be.
@@ -316,19 +461,38 @@ Never say that an answer is a minimum, a target, a requirement, or a qualifying
 level, and never say whether an answer sounds good or bad. You are recording
 what they say, not judging it.
 
+NON-WORKING BRANCH
+If the person says they are not working or are searching, do not ask the
+working-condition questions. Ask these three instead, one at a time: what
+happened after the training; whether anyone from beSingularity or a company
+contacted them; and what would have needed to be different for them to be
+working now. Then continue with the training and satisfaction questions.
+
+TIME CONTROL
+Keep the complete call under six minutes. If time is running short, omit the
+last question, then the sales-work question, then the time-to-work question, and
+record each omitted answer as NOT_ASKED. Never omit the questions about freedom
+to leave, equal treatment, or workers raising problems.
+
 WHEN AN ANSWER IS VAGUE
-Ask once more, in different words. If it is still not clear, accept it, thank
-them, and move on. Do not guess on their behalf and do not offer them a value to
-agree with.
+Ask once more, in different words. If it is still not clear, do not guess on
+their behalf and do not offer them a value to agree with; move to the next
+question without evaluating the answer.
 
 WHEN SOMEONE WILL NOT ANSWER
-If they decline a question, especially about pay, accept it immediately, say
-that is completely fine, and move to the next one. Never ask twice, never
-explain why you need it, and never propose an answer for them to confirm.
+If they decline a question, especially about pay, accept it immediately and
+move to the next one. Never ask twice, never explain why you need it, and never
+propose an answer for them to confirm.
 
 TONE
-Warm, unhurried, and plain. No jargon. No opinions about their employer. When
-you have what you need, thank them for their time and end the call.
+Warm, unhurried, and plain. No jargon. No opinions about their employer. After
+the final available question, say exactly:
+
+Thank you. I wrote down what you said about your work and about the training,
+without your name. beSingularity sees the summary of the whole group. If you want
+your answers removed later, tell beSingularity and they will be deleted. Good luck.
+
+Then end the call. Do not ask any extra question after the closing.
 """
 
 
@@ -361,6 +525,7 @@ Return JSON only, with exactly this shape:
 
 {{
   "consent": true or false,
+  "consent_details": {{"state": "granted_no_name" | "declined" | "voided", "name": false, "quote": false, "voice": false, "photo": false}},
   "language": the ISO code of the language the respondent spoke, e.g. "am",
   "interview_stopped": true or false,
   "stop_reason": a short upper-case code, or null,
@@ -400,6 +565,14 @@ Copy the respondent's words verbatim from the transcript, in the language they
 spoke. Do not translate, tidy, shorten, or paraphrase. Quote the respondent, not
 the interviewer. If the question was never answered, use null.
 
+DATE AND DURATION SAFETY
+For the start-date question, return a value only as an unambiguous Gregorian
+month in YYYY-MM or date in YYYY-MM-DD form. A bare year, an Ethiopian-calendar
+date, or a phrase whose month cannot be identified is VAGUE with value null.
+Never put a year or a start date into a duration/months field. Only report
+employment duration in months when the respondent explicitly states or clearly
+establishes elapsed months.
+
 RULES
 Report only what is in the transcript. If it is not there, the state is
 NOT_ASKED or VAGUE; never fill a gap from what is likely, typical, or implied.
@@ -408,6 +581,15 @@ say whether an answer is good, sufficient, or acceptable.
 Do not output a verdict, a score, or a recommendation.
 Set "interview_stopped" to true only when the interviewer ended the call early,
 and give the reason as a code such as "UNDER_MINIMUM_AGE" or "NO_CONSENT".
+
+REFERENCE OUTPUT RECORD
+The following is the canonical downstream Callwise record shape. Use it to
+understand how extracted facts, consent, worker evidence, quotes, and the
+deterministic good-job result fit together. It is an example only: do not copy
+its values, do not invent fields from it, and do not decide its clauses or
+"counted" value. Those are calculated by code after extraction.
+
+{CALLWISE_RECORD_EXAMPLE}
 """
 
 
@@ -447,8 +629,22 @@ def normalize_extraction(
     raw = raw if isinstance(raw, dict) else {}
     stopped = bool(payload.get("interview_stopped", False))
 
+    raw_consent_details = payload.get("consent_details")
+    consent_details = raw_consent_details if isinstance(raw_consent_details, dict) else {
+        "state": "granted_no_name" if bool(payload.get("consent", False)) else "declined",
+        "name": False,
+        "quote": False,
+        "voice": False,
+        "photo": False,
+    }
+    consent_state = str(consent_details.get("state") or "").lower()
+    consent = bool(payload.get("consent", False)) and consent_state not in {"declined", "voided"}
+
     answers: dict[str, Any] = {}
     for question in questions:
+        if not consent:
+            answers[question["slug"]] = empty_answer(stopped=True)
+            continue
         entry = raw.get(question["slug"])
         if not isinstance(entry, dict):
             answers[question["slug"]] = empty_answer(stopped)
@@ -467,10 +663,11 @@ def normalize_extraction(
     stop_reason = payload.get("stop_reason")
     return {
         "worker_id": worker_id,
-        "consent": bool(payload.get("consent", False)),
+        "consent": consent,
+        "consent_details": consent_details,
         "language": language if isinstance(language, str) and language else None,
-        "interview_stopped": stopped,
-        "stop_reason": stop_reason if isinstance(stop_reason, str) and stop_reason else None,
+        "interview_stopped": stopped or not consent,
+        "stop_reason": ("NO_CONSENT" if not consent else stop_reason) if isinstance(stop_reason, str) and stop_reason else ("NO_CONSENT" if not consent else None),
         "age_assessment": assessment if assessment in AGE_ASSESSMENTS else "UNKNOWN",
         "answers": answers,
         "transcript": transcript,
@@ -486,6 +683,8 @@ __all__ = [
     "normalize_refinement",
     "refine_questions",
     "ANSWER_STATES",
+    "FIXED_QUESTIONNAIRE",
+    "fixed_question_set",
     "LANGUAGE_NAMES",
     "build_extraction_prompt",
     "build_extraction_request",

@@ -151,7 +151,13 @@ def sync_active_calls(db: Session) -> list[TeleExpertCall]:
 
     repository = CallRepository(db)
     updated: list[TeleExpertCall] = []
+    from app.services import batch_service
     for call in repository.list():
+        # The active product is Callwise batches.  Do not let historical rows
+        # from the retired clause/demo path trigger provider calls or noisy 404s
+        # on every scheduler tick.
+        if not batch_service.is_batch_call(db, call.call_id):
+            continue
         needs_status_poll = call.status in ACTIVE_CALL_STATUSES
         needs_result_retry = call.status == "completed" and result_missing(db, call)
         if needs_status_poll or needs_result_retry:

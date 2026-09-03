@@ -34,4 +34,7 @@ class Employer(Base):
     #: where "three o'clock" spoken colloquially is 9:00 AM. One field is cheaper
     #: than a class of scheduling bug nobody would think to look for.
     clock_convention: Mapped[str] = mapped_column(String(20), default="", nullable=False)
+    #: Admin-configurable reporting settings; the questionnaire remains fixed.
+    minimum_wage_etb: Mapped[Any] = mapped_column(Integer, nullable=True)
+    small_cell_threshold: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)

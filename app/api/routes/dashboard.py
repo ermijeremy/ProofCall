@@ -4,22 +4,26 @@ import json
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.services.aggregation_service import aggregate_company, aggregate_programme, live_calls, worker_evidence_detail
+from app.services.batch_service import company_listing
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 templates = Jinja2Templates(directory="app/dashboard/templates")
 
 
 @router.get("", include_in_schema=False)
-def dashboard_home():
-    """Keep the old dashboard URL compatible with the new root chat UI."""
+def dashboard_home(request: Request, db: Session = Depends(get_db)):
+    """Render the current Callwise company listing at the familiar URL."""
 
-    return RedirectResponse(url="/", status_code=307)
+    return templates.TemplateResponse(
+        request=request,
+        name="home.html",
+        context={"companies": company_listing(db)},
+    )
 
 
 @router.get("/overview")

@@ -16,9 +16,54 @@ from __future__ import annotations
 
 from typing import Any
 
+import json
+
+from app.intelligence.providers.base import ProviderError
+
 #: Quotes handed over per question. Enough to ground an answer, few enough that
 #: the model is not tempted to start counting them.
 MAX_QUOTES_PER_QUESTION = 8
+HISTORY_TURNS = 8
+
+
+def build_analysis_prompt() -> str:
+    return """You answer an administrator's question about a completed Callwise batch.
+You are given deterministic counts, not raw worker records. You do not compute.
+Never add, subtract, average, or estimate numbers. Excluded interviews are excluded on purpose and must never be included in category counts. Answer only from the
+provided counts and say when the counts do not contain the requested information.
+Return JSON only: {\"answer\": \"short factual answer\"}."""
+
+
+def build_analysis_request(
+    question: str,
+    summary: dict[str, Any],
+    history: list[dict[str, str]] | None = None,
+) -> str:
+    safe_history = (history or [])[-HISTORY_TURNS:]
+    return (
+        "Counts for this batch:\n\n"
+        + json.dumps(summary, ensure_ascii=False)
+        + "\n\nAdministrator question: "
+        + question
+        + "\n\nRecent conversation:\n"
+        + json.dumps(safe_history, ensure_ascii=False)
+    )
+
+
+def answer(provider: Any, question: str, summary: dict[str, Any], history: list[dict[str, str]] | None = None) -> str:
+    """Narrate stored aggregate counts without allowing the model to calculate."""
+
+    try:
+        payload = provider.complete_json(
+            system=build_analysis_prompt(),
+            user=build_analysis_request(question, summary, history),
+        )
+    except ProviderError:
+        return "The analysis service could not be reached right now."
+    text = payload.get("answer") if isinstance(payload, dict) else None
+    if not isinstance(text, str) or not text.strip():
+        return "The analysis service returned nothing usable."
+    return text.strip()
 
 
 def summarize(
@@ -71,6 +116,12 @@ def summarize(
         "interviews_counted": len(counted),
         "records_total": len(records),
         "excluded_total": len(excluded),
+        "disposition_counts": {
+            disposition: sum(1 for record in records if record.get("disposition") == disposition)
+            for disposition in sorted({record.get("disposition") for record in records if record.get("disposition")})
+        },
+        "partial_total": sum(1 for record in counted if record.get("disposition") == "partial"),
+        "safeguarding_total": sum(1 for record in excluded if "under" in str(record.get("exclusion_reason", "")).lower()),
         "excluded": [
             {
                 "name": record.get("name") or record["worker_id"],
@@ -94,6 +145,9 @@ def headline(summary: dict[str, Any]) -> str:
 
 __all__ = [
     "MAX_QUOTES_PER_QUESTION",
+    "answer",
+    "build_analysis_prompt",
+    "build_analysis_request",
     "headline",
     "summarize",
 ]

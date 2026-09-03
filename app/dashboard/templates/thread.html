@@ -12,14 +12,33 @@
 {% block content %}
 <div class="thread" id="thread"></div>
 
+<section class="thread-analytics" id="thread-analytics" hidden>
+  <div class="analytics-heading">
+    <div><span class="eyebrow">INSIGHTS</span><h2>Worker response patterns</h2></div>
+    <div class="export-actions" id="thread-exports"></div>
+  </div>
+  <div class="chart-grid" id="thread-charts"></div>
+</section>
+
 <div class="composer">
   <form id="composer">
     <input type="file" id="file" accept=".csv" hidden>
     <button class="icon-button" id="attach" type="button" title="Upload a CSV of names and phone numbers">📎</button>
-    <textarea id="text" rows="1" placeholder="Type your questions, or say who to call…"></textarea>
+    <textarea id="text" rows="1" placeholder="Say who to call, when to call, or ask about the results…"></textarea>
     <button class="send-button" id="send" type="submit" title="Send">↑</button>
   </form>
   <p class="composer-hint" id="hint"></p>
+</div>
+
+<div class="modal-backdrop" id="feedback-modal" hidden>
+  <section class="company-modal feedback-modal" role="dialog" aria-modal="true" aria-labelledby="feedback-title">
+    <button class="modal-close" id="feedback-close" type="button" aria-label="Close">×</button>
+    <div class="modal-icon">!</div>
+    <p class="eyebrow">Action needed</p>
+    <h2 id="feedback-title">Please check this</h2>
+    <p class="muted modal-copy" id="feedback-message"></p>
+    <div class="modal-actions"><button class="primary-button" id="feedback-ok" type="button">Okay</button></div>
+  </section>
 </div>
 {% endblock %}
 
@@ -34,11 +53,23 @@
   const fileInput = document.getElementById("file");
   const sendButton = document.getElementById("send");
   const attachButton = document.getElementById("attach");
+  const feedbackModal = document.getElementById("feedback-modal");
+  const feedbackMessage = document.getElementById("feedback-message");
+
+  function showFeedback(message) {
+    feedbackMessage.textContent = message;
+    feedbackModal.hidden = false;
+    document.getElementById("feedback-ok").focus();
+  }
+
+  function closeFeedback() {
+    feedbackModal.hidden = true;
+  }
 
   // What the one input box is for right now. Said out loud rather than left for
   // the administrator to guess, because the box accepts anything.
   const HINTS = {
-    draft: "Upload a CSV with a name column and a phone number column, then type your questions.",
+    draft: "Upload the employee CSV. The fixed Callwise KPI questionnaire is already configured.",
     ready: "Say who to call — everyone, half of them at random, or a few by name.",
     selected: "Say yes to call them now, or give a time, or say no to choose different people.",
     scheduled: "The calls are booked. Say cancel to stop them, or ask me anything.",
@@ -85,7 +116,43 @@
     const excluded = (summary.excluded || [])
       .map((record) => `<p class="excluded-note">${escape(record.name)} — ${escape(record.reason)}</p>`)
       .join("");
-    return `<div class="card"><h4>${summary.interviews_counted} counted · ${summary.excluded_total} left out</h4>${blocks}${excluded}</div>`;
+    const batchId = server && server.round && server.round.batch_id;
+    const exportLinks = batchId
+      ? `<div class="card-actions summary-exports">
+          <a class="ghost-button" href="/api/companies/${encodeURIComponent(COMPANY_ID)}/rounds/${encodeURIComponent(batchId)}/export?format=csv">Export CSV ↓</a>
+          <a class="ghost-button" href="/api/companies/${encodeURIComponent(COMPANY_ID)}/rounds/${encodeURIComponent(batchId)}/export?format=xlsx">Export Excel ↓</a>
+          <a class="ghost-button" href="/api/companies/${encodeURIComponent(COMPANY_ID)}/rounds/${encodeURIComponent(batchId)}/export?format=json">Export JSON ↓</a>
+        </div>`
+      : "";
+    return `<div class="card"><h4>${summary.interviews_counted} counted · ${summary.excluded_total} left out</h4>${blocks}${excluded}${exportLinks}</div>`;
+  }
+
+  function renderAnalytics() {
+    const round = server.round;
+    const summary = round && round.summary;
+    const panel = document.getElementById("thread-analytics");
+    const chartGrid = document.getElementById("thread-charts");
+    const exports = document.getElementById("thread-exports");
+    if (!round || !summary || !round.batch_id) {
+      panel.hidden = true;
+      return;
+    }
+    exports.innerHTML = [
+      ["CSV", "csv"], ["Excel", "xlsx"], ["JSON", "json"]
+    ].map(([label, format]) => `<a class="export-chip" href="/api/companies/${encodeURIComponent(COMPANY_ID)}/rounds/${encodeURIComponent(round.batch_id)}/export?format=${format}">${label} ↓</a>`).join("");
+    const charts = Object.values(summary.questions || {}).map((question) => {
+      const entries = Object.entries(question.category_counts || {});
+      if (!entries.length) return `<div class="chart-card"><h3>${escape(question.question)}</h3><p class="muted">Waiting for categorized answers.</p></div>`;
+      const max = Math.max(...entries.map(([, value]) => Number(value) || 0), 1);
+      const bars = entries.map(([name, value]) => {
+        const count = Number(value) || 0;
+        const percent = Math.round(count / Math.max(question.answered || 0, 1) * 100);
+        return `<div class="bar-row"><div class="bar-label"><span>${escape(name)}</span><b>${count} <small>${percent}%</small></b></div><div class="bar-track"><span style="width:${Math.round(count / max * 100)}%"></span></div></div>`;
+      }).join("");
+      return `<div class="chart-card"><h3>${escape(question.question)}</h3>${bars}</div>`;
+    }).join("");
+    chartGrid.innerHTML = charts;
+    panel.hidden = !charts;
   }
 
   function questionsCard(payload) {
@@ -168,7 +235,11 @@
     const failed = (payload.failed || []).length
       ? `<p class="excluded-note">Could not get through to ${escape(payload.failed.join(", "))}.</p>`
       : "";
-    return `<div class="card"><h4>${plural((payload.dialed || []).length, "call placed", "calls placed")}</h4><ul>${dialed}</ul>${failed}</div>`;
+    const accepted = (payload.dialed || []).length;
+    const progress = accepted
+      ? `<p class="muted small"><span class="live-dot"></span> TeleExpert accepted ${plural(accepted, "call", "calls")}. The interview is now being connected; answers will appear automatically when it finishes.</p>`
+      : "";
+    return `<div class="card"><h4>${accepted ? "Calling now" : "No calls placed"}</h4>${progress}<ul>${dialed}</ul>${failed}</div>`;
   }
 
   function card(payload) {
@@ -212,6 +283,7 @@
     document.getElementById("company-name").textContent = server.name;
     document.getElementById("waiting-on").textContent = server.waiting_on || "";
     document.getElementById("hint").textContent = HINTS[server.status] || "";
+    renderAnalytics();
     window.scrollTo({top: document.body.scrollHeight});
 
     // Poll only while calls are in flight or booked; nothing else changes unless
@@ -261,7 +333,7 @@
       pending = [];
       waiting = false;
       paint();
-      window.alert(error.message);
+      showFeedback(error.message);
     } finally {
       busy(false);
       textarea.focus();
@@ -318,7 +390,7 @@
     };
     const when = value("when");
     if (holder.querySelector('[data-field="when"]') && !when) {
-      window.alert("Pick a date and time first.");
+      showFeedback("Pick a date and time before booking the calls.");
       return;
     }
     const parts = [];
@@ -331,6 +403,10 @@
   });
 
   attachButton.addEventListener("click", () => fileInput.click());
+  document.getElementById("feedback-ok").addEventListener("click", closeFeedback);
+  document.getElementById("feedback-close").addEventListener("click", closeFeedback);
+  feedbackModal.addEventListener("click", (event) => { if (event.target === feedbackModal) closeFeedback(); });
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !feedbackModal.hidden) closeFeedback(); });
 
   fileInput.addEventListener("change", () => {
     const file = fileInput.files[0];

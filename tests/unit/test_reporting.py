@@ -43,6 +43,30 @@ def test_csv_export_contains_counts_and_sdg_rows():
     assert "High" in output
 
 
+def test_csv_export_contains_one_worker_row_and_question_columns():
+    summary = _summary()
+    data = {
+        "batch": {"batch_id": "b1", "title": "Round", "status": "complete"},
+        "questions": [{"slug": "age_years", "text": "How old are you?"}],
+        "summary": summary,
+        "sdg_mapping": sdg_mapping(summary),
+        "worker_rows": [{
+            "person": "Hanna", "contact": "+251911000042", "worker_id": "BSG-1",
+            "language": "am", "gender": "F", "age_band": "25+", "cohort": "COH-1",
+            "placement_status": "placed_job", "interview_status": "completed",
+            "disposition": "completed", "attempts": 1, "good_job_annotation": "UNCLEAR",
+            "included_in_analysis": "yes", "exclusion_reason": "", "call_id": "call-1",
+            "transcript": "", "audio_url": "", "kpi_clauses": {},
+            "answers": {"How old are you?": "25 to 35"},
+        }],
+    }
+    output = csv_bytes(data).decode("utf-8-sig")
+    assert "Person,Contact" in output
+    assert "Hanna,+251911000042" in output
+    assert "How old are you?" in output
+    assert "25 to 35" in output
+
+
 def test_xlsx_export_is_a_readable_zip_package():
     summary = _summary()
     data = {"batch": {"batch_id": "b1", "title": "Round", "status": "complete"}, "summary": summary, "sdg_mapping": sdg_mapping(summary)}

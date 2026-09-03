@@ -28,7 +28,10 @@ WINDOW_END_HOUR = 20
 DEFAULT_RETRIES = 2
 
 #: More than this and a single unanswered number occupies the queue all day.
-MAX_RETRIES = 5
+# The pilot permits at most two phone attempts per person.  A second attempt is
+# scheduled by Callwise after the 24-hour wait; TeleExpert never performs hidden
+# rapid retries inside one request.
+MAX_RETRIES = 2
 
 _ISO_FORMATS = (
     "%Y-%m-%dT%H:%M:%S",

@@ -30,6 +30,9 @@ class Settings(BaseModel):
     scheduler_interval_seconds: int = Field(
         default_factory=lambda: max(1, int(os.getenv("CALLPROOF_SCHEDULER_INTERVAL_SECONDS", "10")))
     )
+    callwise_response_dir: str = Field(
+        default_factory=lambda: os.getenv("CALLWISE_RESPONSE_DIR", "data/callwise_responses")
+    )
 
 
 settings = Settings()
