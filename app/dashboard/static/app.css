@@ -119,6 +119,8 @@ body { -webkit-font-smoothing: antialiased; background-image: radial-gradient(ci
 .turn-agent .bubble time, .turn-admin .bubble time { opacity: .78; }
 .attachment .card { box-shadow: 0 1px 2px rgba(23,32,51,.025); }
 .card-actions { margin-top: 9px; }
+.protocol-ready { display: flex; align-items: center; gap: 8px; margin: 16px 0 0; padding: 10px 12px; border: 1px solid #bfe5e1; border-radius: 10px; color: #126a65; background: #effbf9; font-size: 12px; font-weight: 600; }
+.protocol-ready span { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; color: #fff; background: var(--teal); font-size: 11px; }
 .field { margin-bottom: 8px; }
 .field span { margin-bottom: 4px; }
 .field input { padding: 8px 10px; }
@@ -132,21 +134,303 @@ body { -webkit-font-smoothing: antialiased; background-image: radial-gradient(ci
 .company-card:hover .company-mark { transform: rotate(-3deg) scale(1.04); }
 .company-mark { transition: transform .16s ease; }
 
-/* -- guided interview round -------------------------------------------- */
-.round-layout { max-width: 1120px; margin: 0 auto; padding: 28px 0 64px; }
-.round-hero { display:flex; justify-content:space-between; gap:24px; align-items:flex-start; padding:28px; border-radius:22px; color:#fff; background:linear-gradient(120deg,#173451,#116f70); box-shadow:0 16px 34px rgba(17,76,91,.18); }
-.round-hero h2 { margin:4px 0 8px; color:#fff; font:700 29px 'Space Grotesk',sans-serif; letter-spacing:-.04em; }
-.round-hero .muted { max-width:620px; color:rgba(255,255,255,.76); line-height:1.55; }
-.round-hero .eyebrow { color:#8de0d5; }
-.round-lock { display:flex; gap:11px; min-width:220px; padding:13px 15px; border:1px solid rgba(255,255,255,.2); border-radius:14px; background:rgba(255,255,255,.1); }
-.round-lock span { display:grid; place-items:center; width:25px; height:25px; border-radius:50%; color:#145f5a; background:#9ce4d8; font-weight:800; }
-.round-lock strong,.round-lock small { display:block; }.round-lock strong { font-size:12px; }.round-lock small { margin-top:4px; color:rgba(255,255,255,.7); font-size:11px; line-height:1.35; }
-.round-status { align-self:center; padding:7px 12px; border-radius:99px; color:var(--teal); background:var(--teal-soft); font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.06em; }
-.stepper { display:flex; align-items:center; gap:10px; margin:24px 0; padding:15px 20px; border:1px solid var(--line); border-radius:16px; background:var(--paper); box-shadow:var(--shadow-card); }
-.wizard-step { display:flex; align-items:center; gap:9px; color:var(--muted); }.wizard-step span { display:grid; place-items:center; width:28px;height:28px;border-radius:50%;background:#eef1f6;font-size:12px;font-weight:800; }.wizard-step b,.wizard-step small{display:block}.wizard-step b{font-size:12px;color:var(--ink)}.wizard-step small{margin-top:2px;font-size:10px}.wizard-step.active span{color:#fff;background:var(--teal)}.wizard-step.active small{color:var(--teal)}.wizard-line{height:1px;flex:1;background:#e0e6ee}
-.round-notice { margin:0 0 16px; padding:12px 15px; border:1px solid #bfe5e1; border-radius:12px; color:#126a65; background:#effbf9; font-size:13px; }.round-notice.bad{border-color:#f1b8b1;color:#a33328;background:#fff5f3}.round-notice[hidden]{display:none}
-.round-grid{display:grid;grid-template-columns:minmax(0,1fr) 285px;gap:18px}.round-main{display:grid;gap:18px}.round-panel,.side-card{padding:22px;border:1px solid var(--line);border-radius:18px;background:var(--paper);box-shadow:var(--shadow-card)}.panel-heading{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;margin-bottom:17px}.panel-heading h3,.side-card h3{margin:2px 0 5px;font:700 18px 'Space Grotesk',sans-serif;letter-spacing:-.025em}.panel-heading .muted,.side-card .muted{margin:0;font-size:12px;line-height:1.5}.panel-badge{padding:6px 9px;border-radius:8px;background:#edf2ff;color:#536baa;font-size:10px;font-weight:800;white-space:nowrap}.question-list{display:grid;gap:0;margin:0 0 18px;padding-left:27px}.question-list li{padding:8px 0;border-bottom:1px solid #edf1f5;color:#35445b;font-size:13px}.question-list li::marker{color:var(--teal);font-weight:800}.upload-button{display:inline-flex;align-items:center;padding:8px 12px;border:1px solid #cce7e4;border-radius:9px;color:var(--teal);background:#f3fbfa;font-size:11px;font-weight:800;cursor:pointer}.worker-table{display:grid;gap:7px}.worker-row{display:flex;align-items:center;gap:11px;padding:11px 12px;border:1px solid #edf1f5;border-radius:11px;cursor:pointer}.worker-row:hover{border-color:#bfe5e1;background:#fbfefe}.worker-row input{accent-color:var(--teal)}.worker-row span{flex:1;min-width:0}.worker-row b,.worker-row small{display:block}.worker-row b{font-size:13px}.worker-row small{margin-top:3px;color:var(--muted);font-size:11px}.worker-row em{color:var(--muted);font-size:10px;font-style:normal}.empty-state{padding:22px;border:1px dashed #d9e1ec;border-radius:12px;color:var(--muted);font-size:12px;text-align:center}.panel-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:17px}.panel-actions .primary-button:disabled{opacity:.45}.selected-list{display:grid;gap:7px}.selected-list div{display:flex;justify-content:space-between;gap:12px;padding:11px 12px;border-radius:10px;background:#f5fafb}.selected-list b{font-size:13px}.selected-list span{color:var(--muted);font-size:11px}.review-controls{display:flex;align-items:center;gap:10px;margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}.review-controls label{display:grid;gap:5px;color:var(--ink);font-size:11px;font-weight:700}.review-controls input{width:74px;padding:8px;border:1px solid #d7e0ec;border-radius:8px}.review-controls small{color:var(--muted);font-size:11px}.round-side{display:grid;align-content:start;gap:18px}.status-number{margin:8px 0 0;color:var(--teal);font:700 40px 'Space Grotesk',sans-serif;letter-spacing:-.05em}.progress-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:17px 0}.progress-stats div{padding:9px 5px;border-radius:9px;text-align:center;background:#f6f8fb}.progress-stats b,.progress-stats span{display:block}.progress-stats b{font-size:19px}.progress-stats span{margin-top:2px;color:var(--muted);font-size:10px}.side-link{color:var(--teal);font-size:12px;font-weight:700;text-decoration:none}.side-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:13px}
-@media(max-width:760px){.round-layout{padding:18px 12px}.round-hero{display:block;padding:21px}.round-hero h2{font-size:24px}.round-lock{margin-top:18px}.stepper{overflow:auto}.wizard-line{min-width:16px}.wizard-step{min-width:max-content}.round-grid{grid-template-columns:1fr}.round-side{grid-row:1}.panel-heading{display:block}.panel-badge,.upload-button{display:inline-flex;margin-top:12px}}
+/* -- guided interview round ---------------------------------------------- */
+/* One working surface, read top to bottom: where the round stands, the fixed
+   questions, who is on the roster, then the confirmation. Depth is used sparingly
+   and only to separate those layers -- the hero sits above the page, panels sit on
+   it, and rows sit inside panels. */
+
+.round-layout { max-width: 1140px; margin: 0 auto; padding: 26px 0 72px; }
+
+/* Hero ------------------------------------------------------------------- */
+.round-hero {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 26px;
+  overflow: hidden;
+  padding: 30px 32px;
+  border-radius: 22px;
+  color: #fff;
+  background: linear-gradient(118deg, #14304c 0%, #14554f 58%, #0f6f6a 100%);
+  box-shadow: 0 18px 38px rgba(15, 62, 76, .2);
+}
+/* A soft bloom in the top-right, behind the copy: it keeps the flat gradient from
+   reading as a printed block without competing with the text. */
+.round-hero::after {
+  content: "";
+  position: absolute;
+  top: -55%;
+  right: -12%;
+  width: 46%;
+  padding-bottom: 46%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(126, 226, 212, .3), transparent 68%);
+  pointer-events: none;
+}
+.round-hero > * { position: relative; z-index: 1; }
+.round-hero h2 { margin: 5px 0 9px; color: #fff; font: 700 30px 'Space Grotesk', sans-serif; letter-spacing: -.04em; }
+.round-hero .muted { max-width: 60ch; color: rgba(233, 247, 245, .8); font-size: 13px; line-height: 1.6; }
+.round-hero .eyebrow { color: #8fe4d8; }
+
+.round-lock {
+  display: flex;
+  gap: 12px;
+  min-width: 232px;
+  max-width: 260px;
+  padding: 14px 16px;
+  border: 1px solid rgba(255, 255, 255, .22);
+  border-radius: 15px;
+  background: rgba(255, 255, 255, .1);
+  backdrop-filter: blur(6px);
+}
+.round-lock span { display: grid; flex: 0 0 25px; place-items: center; width: 25px; height: 25px; border-radius: 50%; color: #10504c; background: #9ce4d8; font-size: 13px; font-weight: 800; }
+.round-lock strong, .round-lock small { display: block; }
+.round-lock strong { font-size: 12.5px; }
+.round-lock small { margin-top: 4px; color: rgba(233, 247, 245, .72); font-size: 11px; line-height: 1.45; }
+
+/* Status pill ------------------------------------------------------------ */
+/* Colour carries the state, so the round's position is legible from the header
+   without reading the word. Defaults to the neutral slate for `draft`. */
+.round-status {
+  align-self: center;
+  padding: 7px 13px;
+  border-radius: 99px;
+  border: 1px solid var(--pill-line, #dde3ec);
+  color: var(--pill-ink, #5c6b81);
+  background: var(--pill-bg, #f2f5f9);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.round-status.state-ready    { --pill-ink: #3a5bb8; --pill-bg: #edf2ff; --pill-line: #ccd8f7; }
+.round-status.state-selected { --pill-ink: #8a6113; --pill-bg: var(--amber-soft); --pill-line: #f0dcb0; }
+.round-status.state-calling  { --pill-ink: #0b6f6a; --pill-bg: var(--teal-soft); --pill-line: #b8e3de; }
+.round-status.state-complete { --pill-ink: #0b6f6a; --pill-bg: var(--teal-soft); --pill-line: #b8e3de; }
+/* Only a live round animates; a finished one should sit still. */
+.round-status.state-calling::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--teal);
+  animation: pulse-dot 1.6s ease-in-out infinite;
+}
+@keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+
+/* Stepper ---------------------------------------------------------------- */
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 22px 0;
+  padding: 16px 22px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--paper);
+  box-shadow: var(--shadow-card);
+}
+.wizard-step { display: flex; align-items: center; gap: 10px; color: var(--muted); }
+.wizard-step span {
+  display: grid;
+  flex: 0 0 29px;
+  place-items: center;
+  width: 29px;
+  height: 29px;
+  border-radius: 50%;
+  background: #eef1f6;
+  color: #8794a8;
+  font-size: 12px;
+  font-weight: 800;
+  transition: background .18s ease, color .18s ease, box-shadow .18s ease;
+}
+.wizard-step b, .wizard-step small { display: block; }
+.wizard-step b { color: #8794a8; font-size: 12.5px; transition: color .18s ease; }
+.wizard-step small { margin-top: 2px; font-size: 10px; }
+/* A step already passed reads as a tick, so the numbers ahead are the ones left. */
+.wizard-step.done span { color: #fff; background: #7cc9c1; font-size: 0; }
+.wizard-step.done span::after { content: "✓"; font-size: 14px; }
+.wizard-step.done b { color: var(--ink); }
+.wizard-step.active span { color: #fff; background: var(--teal); box-shadow: var(--ring); }
+.wizard-step.active b { color: var(--ink); }
+.wizard-step.active small { color: var(--teal); font-weight: 700; }
+.wizard-line { height: 2px; flex: 1; min-width: 14px; border-radius: 2px; background: #e4e9f0; }
+.wizard-line.done { background: #a8ded7; }
+
+/* Notice ----------------------------------------------------------------- */
+.round-notice {
+  margin: 0 0 16px;
+  padding: 12px 16px;
+  border: 1px solid #b8e3de;
+  border-left: 3px solid var(--teal);
+  border-radius: 12px;
+  color: #0e5f5b;
+  background: #f0fbf9;
+  font-size: 13px;
+}
+.round-notice.bad { border-color: #f2bdb6; border-left-color: var(--red); color: #9b3227; background: #fff5f3; }
+.round-notice[hidden] { display: none; }
+
+/* Panels ----------------------------------------------------------------- */
+.round-grid { display: grid; grid-template-columns: minmax(0, 1fr) 292px; gap: 18px; align-items: start; }
+.round-main { display: grid; gap: 18px; min-width: 0; }
+.round-panel, .side-card { padding: 23px; border: 1px solid var(--line); border-radius: 18px; background: var(--paper); box-shadow: var(--shadow-card); }
+.panel-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; margin-bottom: 18px; }
+.panel-heading h3, .side-card h3 { margin: 3px 0 5px; font: 700 18px 'Space Grotesk', sans-serif; letter-spacing: -.025em; }
+.panel-heading .muted, .side-card .muted { margin: 0; font-size: 12px; line-height: 1.55; }
+.panel-badge { padding: 6px 10px; border: 1px solid #ccd8f7; border-radius: 8px; background: #edf2ff; color: #3a5bb8; font-size: 10px; font-weight: 800; letter-spacing: .03em; white-space: nowrap; }
+
+/* Questionnaire ---------------------------------------------------------- */
+/* Sixteen fixed questions are a long single column, so they run in two on a wide
+   screen. Numbered with a counter rather than a list marker: the marker cannot be
+   given a background, and the number is what the administrator refers to. */
+.question-list { margin: 0 0 18px; padding: 0; list-style: none; counter-reset: q; }
+.question-list li {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 9px 0;
+  border-bottom: 1px solid #eef1f5;
+  color: #35445b;
+  font-size: 13px;
+  line-height: 1.5;
+  break-inside: avoid;
+}
+.question-list li::before {
+  counter-increment: q;
+  content: counter(q);
+  flex: 0 0 21px;
+  padding: 2px 0;
+  border-radius: 6px;
+  background: var(--teal-soft);
+  color: var(--teal);
+  font-size: 10px;
+  font-weight: 800;
+  text-align: center;
+}
+@media (min-width: 1000px) {
+  .question-list { columns: 2; column-gap: 30px; }
+  /* Column rules would otherwise cut the last row of each column unevenly. */
+  .question-list li:last-child { border-bottom: 0; }
+}
+.protocol-ready { display: flex; align-items: center; gap: 9px; margin: 4px 0 0; padding: 11px 13px; border: 1px solid #b8e3de; border-radius: 10px; color: #0e5f5b; background: #f0fbf9; font-size: 12px; font-weight: 600; }
+.protocol-ready span { display: grid; flex: 0 0 18px; place-items: center; width: 18px; height: 18px; border-radius: 50%; color: #fff; background: var(--teal); font-size: 11px; }
+
+/* Roster ----------------------------------------------------------------- */
+.upload-button { display: inline-flex; align-items: center; gap: 6px; padding: 9px 13px; border: 1px solid #b8e3de; border-radius: 9px; color: var(--teal); background: #f0fbf9; font-size: 11px; font-weight: 800; letter-spacing: .02em; cursor: pointer; transition: background .16s ease, border-color .16s ease; }
+.upload-button:hover { border-color: var(--teal); background: var(--teal-soft); }
+.upload-button:focus-within { box-shadow: var(--ring); }
+
+/* Bulk selection. "Select all" and a random sample of a size the administrator
+   sets are the two ways a long roster gets narrowed down; a worker with a call
+   already in flight is locked out of both. */
+.roster-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 11px 14px;
+  border: 1px solid #e8edf4;
+  border-radius: 12px;
+  background: linear-gradient(#fcfdff, #f7f9fc);
+}
+.roster-tools[hidden] { display: none; }
+.selection-count { margin: 0; color: var(--muted); font-size: 12px; }
+.selection-count b { color: var(--teal); font-size: 15px; font-variant-numeric: tabular-nums; }
+.roster-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.roster-buttons .ghost-button { padding: 7px 13px; font-size: 12px; }
+/* Not `progress`, which the shared disabled rule sets: these are disabled because
+   there is nothing left to select, not because something is loading. */
+.roster-buttons .ghost-button:disabled { cursor: not-allowed; }
+.random-picker { display: inline-flex; align-items: center; gap: 7px; padding-left: 10px; border-left: 1px solid #e0e6ee; }
+.random-picker label { color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+.random-picker input { width: 60px; padding: 7px 8px; border: 1px solid #d7e0ec; border-radius: 8px; font: inherit; font-size: 12px; text-align: center; }
+.random-picker input:focus-visible { border-color: var(--teal); box-shadow: var(--ring); outline: 0; }
+
+.worker-table { display: grid; gap: 7px; }
+.worker-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 13px;
+  border: 1px solid #eef1f5;
+  border-radius: 11px;
+  cursor: pointer;
+  transition: border-color .14s ease, background .14s ease;
+}
+.worker-row:hover { border-color: #b8e3de; background: #fbfefe; }
+.worker-row input { flex: 0 0 auto; width: 16px; height: 16px; accent-color: var(--teal); cursor: pointer; }
+/* The selected state is worth being loud about: it is the list that gets called. */
+.worker-row:has(input:checked) { border-color: #9bd9d1; background: var(--teal-soft); }
+.worker-row:has(input:focus-visible) { box-shadow: var(--ring); }
+.worker-row span { flex: 1; min-width: 0; }
+.worker-row b, .worker-row small { display: block; }
+.worker-row b { font-size: 13px; }
+.worker-row small { margin-top: 3px; color: var(--muted); font-size: 11px; }
+.worker-row em { color: var(--muted); font-size: 10px; font-style: normal; letter-spacing: .03em; text-transform: uppercase; white-space: nowrap; }
+.worker-row.locked, .worker-row.locked:hover { border-color: #eef1f5; background: #fafbfc; cursor: default; }
+.worker-row.locked > span { opacity: .6; }
+.recall-button { flex: 0 0 auto; }
+
+.empty-state { padding: 26px; border: 1px dashed #d9e1ec; border-radius: 12px; color: var(--muted); font-size: 12.5px; text-align: center; }
+.panel-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 18px; }
+.panel-actions .primary-button:disabled { opacity: .45; }
+
+/* Final review ----------------------------------------------------------- */
+.selected-list { display: grid; gap: 7px; }
+.selected-list div { display: flex; justify-content: space-between; gap: 12px; padding: 11px 13px; border-radius: 10px; background: #f4faf9; }
+.selected-list b { font-size: 13px; }
+.selected-list span { color: var(--muted); font-size: 11px; }
+.review-controls { display: flex; align-items: center; gap: 12px; margin-top: 17px; padding-top: 15px; border-top: 1px solid var(--line); }
+.review-controls label { display: grid; gap: 5px; color: var(--ink); font-size: 11px; font-weight: 700; }
+.review-controls input { width: 74px; padding: 8px; border: 1px solid #d7e0ec; border-radius: 8px; font: inherit; }
+.review-controls input:focus-visible { border-color: var(--teal); box-shadow: var(--ring); outline: 0; }
+.review-controls small { color: var(--muted); font-size: 11px; }
+
+/* Side column ------------------------------------------------------------ */
+/* Sticky so the round's state and the live counters stay in view while a long
+   roster is scrolled -- they are what the confirmation is judged against. */
+.round-side { display: grid; align-content: start; gap: 18px; position: sticky; top: 74px; }
+.status-number { margin: 9px 0 0; color: var(--teal); font: 700 40px 'Space Grotesk', sans-serif; letter-spacing: -.05em; line-height: 1; }
+.progress-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin: 17px 0; }
+.progress-stats div { padding: 10px 5px; border: 1px solid #eef1f5; border-radius: 10px; background: #f8fafc; text-align: center; }
+.progress-stats b, .progress-stats span { display: block; }
+.progress-stats b { font-size: 19px; font-variant-numeric: tabular-nums; }
+.progress-stats span { margin-top: 2px; color: var(--muted); font-size: 10px; }
+.side-links { display: grid; gap: 9px; }
+.side-link { color: var(--teal); font-size: 12px; font-weight: 700; text-decoration: none; }
+.side-link:hover { text-decoration: underline; }
+.side-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 13px; }
+
+@media (max-width: 900px) {
+  .round-grid { grid-template-columns: 1fr; }
+  .round-side { position: static; grid-row: 1; }
+}
+@media (max-width: 760px) {
+  .round-layout { padding: 18px 12px; }
+  .round-hero { display: block; padding: 22px; }
+  .round-hero h2 { font-size: 24px; }
+  .round-lock { max-width: none; margin-top: 18px; }
+  .stepper { overflow-x: auto; }
+  .wizard-step { min-width: max-content; }
+  .panel-heading { display: block; }
+  .panel-badge, .upload-button { display: inline-flex; margin-top: 12px; }
+  .roster-tools { flex-direction: column; align-items: flex-start; }
+  .random-picker { padding-left: 0; border-left: 0; }
+  .panel-actions .primary-button { width: 100%; }
+}
+/* Honour a reduced-motion preference: the pulse and lifts are decoration. */
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
+
 
 /* -- buttons ------------------------------------------------------------- */
 
@@ -165,11 +449,19 @@ body { -webkit-font-smoothing: antialiased; background-image: radial-gradient(ci
   box-shadow: 0 1px 2px rgba(13, 138, 131, .3);
 }
 
-.primary-button:hover { background: #0b7a74; box-shadow: 0 4px 14px rgba(13, 138, 131, .28); }
+.primary-button:hover { background: #0b7a74; box-shadow: 0 4px 14px rgba(13, 138, 131, .28); transform: translateY(-1px); }
 .primary-button:active, .ghost-button:active { transform: translateY(1px); }
-.ghost-button { border: 1px solid var(--line); background: var(--paper); color: var(--ink); }
-.ghost-button:hover { border-color: var(--teal); color: var(--teal); }
-.primary-button:disabled, .ghost-button:disabled { opacity: .6; cursor: progress; transform: none; }
+.ghost-button { border: 1px solid #dfe5ee; background: var(--paper); color: var(--ink); }
+.ghost-button:hover { border-color: var(--teal); color: var(--teal); background: #f7fdfc; }
+.primary-button:disabled, .ghost-button:disabled { opacity: .6; cursor: progress; transform: none; box-shadow: none; }
+.primary-button:disabled:hover, .ghost-button:disabled:hover { background: var(--teal); }
+.ghost-button:disabled:hover { border-color: #dfe5ee; background: var(--paper); color: var(--ink); }
+/* Keyboard focus is visible on every control; a mouse click is not ringed. */
+.primary-button:focus-visible, .ghost-button:focus-visible, .upload-button:focus-visible,
+.side-link:focus-visible, .back-link:focus-visible, .export-chip:focus-visible {
+  outline: 0;
+  box-shadow: var(--ring);
+}
 
 /* -- the list of companies ----------------------------------------------- */
 

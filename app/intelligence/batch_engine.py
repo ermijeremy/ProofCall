@@ -23,6 +23,7 @@ results conversation down with the router.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from app.intelligence import agent, categorize, questions, safeguarding
@@ -34,8 +35,33 @@ logger = logging.getLogger(__name__)
 class BatchIntelligence:
     """Interview prompts, answer extraction, categories, and routing."""
 
-    def __init__(self, provider: LLMProvider) -> None:
-        self.provider = provider
+    def __init__(
+        self,
+        provider: LLMProvider | None = None,
+        *,
+        provider_factory: Callable[[], LLMProvider] | None = None,
+    ) -> None:
+        if provider is None and provider_factory is None:
+            raise ValueError("BatchIntelligence needs a provider or a provider_factory")
+        self._provider = provider
+        self._provider_factory = provider_factory
+
+    @property
+    def provider(self) -> LLMProvider:
+        """The provider, built on the first model call rather than at construction.
+
+        Not every method here reaches a model: :meth:`interview_prompt` is pure
+        templating, and it is the only one dialing uses. Building the provider
+        eagerly made a missing API key a 500 on the one action that never needed a
+        key, taking down dialing for a questionnaire that is fixed in the first
+        place. Deferring it keeps the failure where it belongs -- on extraction,
+        which does call the model and already reports a provider error honestly.
+        """
+
+        if self._provider is None:
+            assert self._provider_factory is not None  # guarded in __init__
+            self._provider = self._provider_factory()
+        return self._provider
 
     @property
     def name(self) -> str:
@@ -131,11 +157,16 @@ def build_batch_intelligence(provider: LLMProvider | None = None) -> BatchIntell
     an API key.
     """
 
-    if provider is None:
+    if provider is not None:
+        return BatchIntelligence(provider)
+
+    def gemini() -> LLMProvider:
         from app.intelligence.providers.gemini import GeminiProvider
 
-        provider = GeminiProvider()
-    return BatchIntelligence(provider)
+        return GeminiProvider()
+
+    # Passed as a factory, not an instance: see BatchIntelligence.provider.
+    return BatchIntelligence(provider_factory=gemini)
 
 
 __all__ = ["BatchIntelligence", "build_batch_intelligence"]
