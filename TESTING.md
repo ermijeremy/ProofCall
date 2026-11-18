@@ -5,6 +5,8 @@ API key, no network, and no phone.
 
 ## Setup, once
 
+Use Python 3.11 or later; the pinned multipart parser requires it.
+
 ```sh
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
@@ -49,6 +51,26 @@ The Callwise path has its own modules:
 .venv/bin/python -m pytest tests/integration/test_webhook_layer.py -q  # signatures, replay, the drain
 .venv/bin/python -m pytest tests/integration/test_batch_pages.py -q    # the two rendered pages
 ```
+
+Upload and operator-state regression checks:
+
+```sh
+.venv/bin/python -m pytest tests/integration/test_upload_limits.py tests/unit/test_import_limits.py tests/integration/test_company_settings.py tests/integration/test_batch_pages.py -q
+node tests/js/round.test.cjs
+```
+
+The JavaScript checks use Node's built-in test runner and execute the round page's
+production script with a small DOM boundary and deferred HTTP responses. They
+cover local checkbox edits, removed contacts, review-before-confirmation and
+out-of-order polling/mutation responses without contacting a service.
+
+All CSV import routes accept one file and no extra form fields. Limits are shared
+in `app/core/import_limits.py`: 1 MiB per CSV, another 64 KiB for multipart framing,
+10,000 data rows, 64 columns and 4,096 characters per field (including headers).
+The request budget is enforced while streaming, including when Content-Length is
+absent or inaccurate. The pinned multipart parser additionally bounds part header
+size and count. Inputs exceeding these budgets fail before any contact import;
+service callers receive the same CSV validation as HTTP callers.
 
 Two tests answer "does the whole thing work".
 `tests/integration/test_callwise_pipeline.py` covers roster → fixed questionnaire
