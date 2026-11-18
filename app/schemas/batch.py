@@ -1,6 +1,8 @@
 """Request bodies for the company thread."""
 
-from pydantic import BaseModel, Field
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from pydantic import BaseModel, Field, field_validator
 
 
 class CompanyCreate(BaseModel):
@@ -12,6 +14,24 @@ class CompanySettingsUpdate(BaseModel):
     clock_convention: str | None = Field(default=None, pattern="^(24h|ethiopian)$")
     minimum_wage_etb: int | None = Field(default=None, ge=0)
     small_cell_threshold: int | None = Field(default=None, ge=0, le=1000)
+
+    @field_validator("timezone", "clock_convention", "small_cell_threshold", mode="before")
+    @classmethod
+    def required_settings_cannot_be_null(cls, value):
+        # Omitted fields retain their current values; explicit null is not a
+        # reset instruction for the corresponding NOT NULL database columns.
+        if value is None:
+            raise ValueError("This setting cannot be null")
+        return value
+
+    @field_validator("timezone")
+    @classmethod
+    def valid_timezone(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError("Use a valid IANA timezone") from exc
+        return value
 
 
 class BatchCreate(BaseModel):

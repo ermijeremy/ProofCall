@@ -15,6 +15,7 @@ import json
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
 from sqlalchemy.orm import Session
 
+from app.api.uploads import BoundedUploadRoute, read_csv_upload
 from app.db.session import get_db
 from app.models.batch import InterviewBatch
 from app.models.employer import Employer
@@ -40,7 +41,7 @@ from app.repositories.batches import BatchTargetRepository, BatchRepository
 from app.repositories.beneficiaries import BeneficiaryRepository
 from app.services.reporting_service import csv_bytes, report, worker_rows, xlsx_bytes
 
-router = APIRouter(prefix="/companies", tags=["companies"])
+router = APIRouter(prefix="/companies", tags=["companies"], route_class=BoundedUploadRoute)
 
 
 def _messages(items) -> list[dict]:
@@ -123,9 +124,8 @@ async def upload_people(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ) -> dict:
-    if not file.filename or not file.filename.lower().endswith(".csv"):
-        raise HTTPException(status_code=400, detail="Upload a CSV file")
-    replies = handle_upload(db, company_id, await file.read(), file.filename)
+    content = await read_csv_upload(file)
+    replies = handle_upload(db, company_id, content, file.filename)
     return {"messages": _messages(replies), "thread": company_thread(db, company_id)}
 
 

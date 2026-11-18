@@ -3,12 +3,13 @@
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
+from app.api.uploads import BoundedUploadRoute, read_csv_upload
 from app.db.session import get_db
 from app.repositories.beneficiaries import BeneficiaryRepository
 from app.schemas.beneficiary import BeneficiaryCreate, BeneficiaryRead
 from app.services.import_service import import_beneficiaries_csv, import_beneficiary
 
-router = APIRouter(prefix="/beneficiaries", tags=["beneficiaries"])
+router = APIRouter(prefix="/beneficiaries", tags=["beneficiaries"], route_class=BoundedUploadRoute)
 
 
 @router.post("", response_model=BeneficiaryRead)
@@ -23,9 +24,8 @@ def list_beneficiaries(db: Session = Depends(get_db)) -> list[BeneficiaryRead]:
 
 @router.post("/import-csv")
 async def import_beneficiaries(file: UploadFile = File(...), db: Session = Depends(get_db)) -> dict:
-    if not file.filename or not file.filename.lower().endswith(".csv"):
-        raise HTTPException(status_code=400, detail="Upload a CSV file")
+    content = await read_csv_upload(file)
     try:
-        return import_beneficiaries_csv(db, await file.read())
+        return import_beneficiaries_csv(db, content)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

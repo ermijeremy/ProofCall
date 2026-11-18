@@ -11,6 +11,7 @@ import json
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
 from sqlalchemy.orm import Session
 
+from app.api.uploads import BoundedUploadRoute, read_csv_upload
 from app.db.session import get_db
 from app.repositories.batches import BatchRepository
 from app.schemas.batch import BatchCreate, BatchMessageCreate, FixtureReplayCreate
@@ -24,7 +25,7 @@ from app.services.batch_service import (
 )
 from app.services.reporting_service import csv_bytes, report, worker_report, worker_rows, xlsx_bytes
 
-router = APIRouter(prefix="/batches", tags=["batches"])
+router = APIRouter(prefix="/batches", tags=["batches"], route_class=BoundedUploadRoute)
 
 
 def _messages(items) -> list[dict]:
@@ -129,10 +130,9 @@ async def upload_roster(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ) -> dict:
-    if not file.filename or not file.filename.lower().endswith(".csv"):
-        raise HTTPException(status_code=400, detail="Upload a CSV file")
+    content = await read_csv_upload(file)
     try:
-        replies = handle_upload(db, batch_id, await file.read(), file.filename)
+        replies = handle_upload(db, batch_id, content, file.filename)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"messages": _messages(replies), "batch": batch_detail(db, batch_id)}

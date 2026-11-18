@@ -83,15 +83,47 @@ async function payloadOf(response){const text=await response.text();try{return J
 // repaints it. A worker with a live call is locked instead: selecting them again
 // opens a second round and places a duplicate concurrent call.
 const ACTIVE=['dialing','in_progress','queued'];
+// Store both checks and unchecks until a selection is acknowledged by the server.
+const selectionEdits=new Map();
+let stateVersion=0;let refreshSequence=0;
 const boxes=()=>[...document.querySelectorAll('[data-worker]')];
-const selectable=()=>boxes().filter(b=>!b.disabled);
+const selectable=()=>boxes().filter(b=>b.dataset.locked!=='true');
 const chosen=()=>selectable().filter(b=>b.checked);
-function syncSelection(){const free=selectable();const picked=chosen().length;$('selection-count').textContent=picked;$('selectable-count').textContent=free.length;$('review-selection').disabled=!picked;$('select-all').disabled=!free.length||picked===free.length;$('clear-selection').disabled=!picked;$('select-random').disabled=!free.length;$('random-size').max=free.length||1;}
-function setAll(checked){for(const box of selectable())box.checked=checked;syncSelection();}
+function syncSelection(){
+  for(const box of boxes())box.disabled=busy||box.dataset.locked==='true';
+  const free=selectable();const picked=chosen().length;
+  $('selection-count').textContent=picked;$('selectable-count').textContent=free.length;
+  $('review-selection').disabled=busy||!picked;
+  $('select-all').disabled=busy||!free.length||picked===free.length;
+  $('clear-selection').disabled=busy||!picked;$('select-random').disabled=busy||!free.length;
+  $('random-size').disabled=busy;$('random-size').max=free.length||1;
+  // The confirm action dials the server's reviewed selection. Local changes
+  // must go through Review again rather than dialing a now-unchecked person.
+  const needsReview=(state.people||[]).some(p=>selectionEdits.has(p.worker_id)&&selectionEdits.get(p.worker_id)!==Boolean(p.selected));
+  $('confirm-calls').disabled=busy||needsReview;$('csv-file').disabled=busy;
+}
+function rememberSelection(){for(const box of selectable())selectionEdits.set(box.dataset.worker,box.checked);syncSelection();}
+function beginMutation(){busy=true;stateVersion+=1;syncSelection();}
+function endMutation(){busy=false;paint();}
+function setAll(checked){if(busy)return;for(const box of selectable())box.checked=checked;rememberSelection();}
 // Fisher–Yates over the unlocked rows, then keep the first n: who gets interviewed
 // is the evidence base for the whole round, so the sample has to be unbiased.
-function pickRandom(){const free=selectable();if(!free.length)return notify('Nobody on the roster is available to call.',true);const wanted=Math.max(1,Math.min(free.length,Math.floor(Number($('random-size').value)||0)));$('random-size').value=wanted;for(let i=free.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[free[i],free[j]]=[free[j],free[i]];}free.forEach((box,index)=>{box.checked=index<wanted;});syncSelection();notify(`${wanted} of ${free.length} ${free.length===1?'person':'people'} picked at random. Review the names before confirming.`);}
-function roster(){const people=state.people||[];$('roster-empty').hidden=people.length>0;$('roster-list').hidden=!people.length;$('roster-tools').hidden=!people.length;$('roster-list').innerHTML=people.map(p=>{const active=ACTIVE.includes(p.call_status);const label=p.ever_called?(active?'call in progress':p.call_status==='retry_wait'?'retry scheduled':'call again allowed'):p.call_status||'available';const button=p.ever_called?`<button type="button" class="ghost-button recall-button" data-recall="${esc(p.worker_id)}" ${active?'disabled':''}>${active?'Call in progress':'Call again now'}</button>`:'';return `<label class="worker-row${active?' locked':''}"><input type="checkbox" data-worker="${esc(p.worker_id)}" ${p.selected?'checked':''} ${active?'disabled':''}><span><b>${esc(p.name)}</b><small>${esc(p.phone_number)} · ${esc((p.preferred_language||'am').toUpperCase())}</small></span><em>${label}</em>${button}</label>`;}).join('');syncSelection();}
+function pickRandom(){if(busy)return;const free=selectable();if(!free.length)return notify('Nobody on the roster is available to call.',true);const wanted=Math.max(1,Math.min(free.length,Math.floor(Number($('random-size').value)||0)));$('random-size').value=wanted;for(let i=free.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[free[i],free[j]]=[free[j],free[i]];}free.forEach((box,index)=>{box.checked=index<wanted;});rememberSelection();notify(`${wanted} of ${free.length} ${free.length===1?'person':'people'} picked at random. Review the names before confirming.`);}
+function roster(){
+  const people=state.people||[];
+  const eligible=new Set(people.filter(p=>!ACTIVE.includes(p.call_status)&&!p.excluded&&p.is_active!==false).map(p=>p.worker_id));
+  let removed=0;
+  for(const [id,checked] of selectionEdits){if(!eligible.has(id)){if(checked)removed+=1;selectionEdits.delete(id);}}
+  $('roster-empty').hidden=people.length>0;$('roster-list').hidden=!people.length;$('roster-tools').hidden=!people.length;
+  $('roster-list').innerHTML=people.map(p=>{
+    const active=ACTIVE.includes(p.call_status);const locked=!eligible.has(p.worker_id);
+    const checked=!locked&&(selectionEdits.has(p.worker_id)?selectionEdits.get(p.worker_id):p.selected);
+    const label=p.excluded?'not eligible':p.ever_called?(active?'call in progress':p.call_status==='retry_wait'?'retry scheduled':'call again allowed'):p.call_status||'available';
+    const button=p.ever_called?`<button type="button" class="ghost-button recall-button" data-recall="${esc(p.worker_id)}" ${locked||busy?'disabled':''}>${active?'Call in progress':'Call again now'}</button>`:'';
+    return `<label class="worker-row${locked?' locked':''}"><input type="checkbox" data-worker="${esc(p.worker_id)}" data-locked="${locked}" ${checked?'checked':''} ${locked||busy?'disabled':''}><span><b>${esc(p.name)}</b><small>${esc(p.phone_number)} · ${esc((p.preferred_language||'am').toUpperCase())}</small></span><em>${label}</em>${button}</label>`;
+  }).join('');syncSelection();
+  if(removed)notify(`${removed} selected ${removed===1?'person is':'people are'} no longer available to call. Review the remaining selection.`,true);
+}
 function paint(){roster();const r=state.round||{};const status=state.status||'draft';$('status-pill').textContent=status.replaceAll('_',' ');$('status-pill').className=`round-status state-${status}`;$('status-number').textContent=r.returned||0;$('selected-count').textContent=r.selected||0;$('dialed-count').textContent=r.dialed||0;$('returned-count').textContent=r.returned||0;$('status-title').textContent=status==='complete'?'Round complete':status==='calling'?'Interviews are running':status==='selected'?'Ready to confirm':'Next action';$('status-copy').textContent=status==='complete'?'Answers have been categorized and are ready to export.':status==='calling'?'TeleExpert will update the results automatically when calls finish.':'Upload the roster, review the fixed questionnaire, select workers, and confirm.'; const selected=(state.people||[]).filter(p=>p.selected);$('review-panel').hidden=status!=='selected';$('selected-list').innerHTML=selected.map(p=>`<div><b>${esc(p.name)}</b><span>${esc(p.phone_number)}</span></div>`).join('');$('results-card').hidden=status!=='complete';if(status==='complete'){const id=r.batch_id;$('export-links').innerHTML=['csv','xlsx','json'].map(f=>`<a class="export-chip" href="/api/companies/${encodeURIComponent(COMPANY_ID)}/rounds/${encodeURIComponent(id)}/export?format=${f}">${f.toUpperCase()} ↓</a>`).join('');} stepper(status);}
 // The round's position as one index rather than four independent conditions, so a
 // passed step can tick and the connector behind it can fill. `ready` means the
@@ -107,26 +139,30 @@ function stepper(status){const at=STEP_AT[status]??0;const finished=status==='co
 // alarming anybody over, so tolerate a couple, then say so plainly.
 let missed=0;
 async function refresh({loud=false}={}){
+  if(busy)return;
+  const version=stateVersion;const sequence=++refreshSequence;
   try{
     const r=await fetch(`/api/companies/${encodeURIComponent(COMPANY_ID)}`);
     const body=await payloadOf(r);
+    if(busy||version!==stateVersion||sequence!==refreshSequence)return;
     if(!r.ok)throw Error(body.detail||`Server error (${r.status}).`);
     const recovered=missed>=3;missed=0;state=body;paint();
     if(recovered)notify('Live updates resumed.');
   }catch(e){
+    if(busy||version!==stateVersion||sequence!==refreshSequence)return;
     missed+=1;
     if(loud)notify(e.message,true);
     else if(missed===3)notify(`Live updates stopped: ${e.message} The round is still running — reload to catch up.`,true);
   }
 }
-async function action(path, payload={}){if(busy)return;busy=true;notify('Working…');try{const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const b=await payloadOf(r);if(!r.ok)throw Error(b.detail||'Action failed');state=b.thread;paint();$('notice').hidden=true;}catch(e){notify(e.message,true);}finally{busy=false;}}
-async function upload(file){const data=new FormData();data.append('file',file);busy=true;notify('Importing roster…');try{const r=await fetch(`/api/companies/${encodeURIComponent(COMPANY_ID)}/upload`,{method:'POST',body:data});const b=await payloadOf(r);if(!r.ok)throw Error(b.detail||'Upload failed');state=b.thread;paint();notify('Roster imported. Review the fixed questionnaire, then select workers.');}catch(e){notify(e.message,true);}finally{busy=false;}}
-async function recall(workerId){if(busy)return;busy=true;notify('Creating a new call…');try{let r=await fetch(`/api/companies/${encodeURIComponent(COMPANY_ID)}/rounds/select`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({worker_ids:[workerId]})});let b=await payloadOf(r);if(!r.ok)throw Error(b.detail||'Could not select worker');state=b.thread;paint();r=await fetch(`/api/companies/${encodeURIComponent(COMPANY_ID)}/rounds/dial`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({retries:1})});b=await payloadOf(r);if(!r.ok)throw Error(b.detail||'Could not place call');state=b.thread;paint();notify((b.result?.dialed||[]).length?'New call placed successfully.':'The new call could not be placed.',!(b.result?.dialed||[]).length);}catch(e){notify(e.message,true);}finally{busy=false;}}
+async function action(path, payload={}){if(busy)return;beginMutation();notify('Working…');try{const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const b=await payloadOf(r);if(!r.ok)throw Error(b.detail||'Action failed');if(path.endsWith('/rounds/select'))selectionEdits.clear();state=b.thread;paint();$('notice').hidden=true;}catch(e){notify(e.message,true);}finally{endMutation();}}
+async function upload(file){if(busy)return;const data=new FormData();data.append('file',file);beginMutation();notify('Importing roster…');try{const r=await fetch(`/api/companies/${encodeURIComponent(COMPANY_ID)}/upload`,{method:'POST',body:data});const b=await payloadOf(r);if(!r.ok)throw Error(b.detail||'Upload failed');state=b.thread;paint();notify('Roster imported. Review the fixed questionnaire, then select workers.');}catch(e){notify(e.message,true);}finally{endMutation();}}
+async function recall(workerId){if(busy)return;beginMutation();notify('Creating a new call…');try{let r=await fetch(`/api/companies/${encodeURIComponent(COMPANY_ID)}/rounds/select`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({worker_ids:[workerId]})});let b=await payloadOf(r);if(!r.ok)throw Error(b.detail||'Could not select worker');state=b.thread;paint();r=await fetch(`/api/companies/${encodeURIComponent(COMPANY_ID)}/rounds/dial`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({retries:1})});b=await payloadOf(r);if(!r.ok)throw Error(b.detail||'Could not place call');state=b.thread;paint();notify((b.result?.dialed||[]).length?'New call placed successfully.':'The new call could not be placed.',!(b.result?.dialed||[]).length);}catch(e){notify(e.message,true);}finally{endMutation();}}
 $('csv-file').onchange=e=>e.target.files[0]&&upload(e.target.files[0]);$('change-selection').onclick=()=>refresh({loud:true});$('review-selection').onclick=()=>{const ids=chosen().map(x=>x.dataset.worker);if(!ids.length)return notify('Select at least one available worker.',true);action(`/api/companies/${encodeURIComponent(COMPANY_ID)}/rounds/select`,{worker_ids:ids});};
 $('select-all').onclick=()=>setAll(true);$('clear-selection').onclick=()=>setAll(false);$('select-random').onclick=()=>pickRandom();$('random-size').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();pickRandom();}};
 $('confirm-calls').onclick=()=>{const n=Math.max(0,Math.min(5,Number($('retries').value)||0));action(`/api/companies/${encodeURIComponent(COMPANY_ID)}/rounds/dial`,{retries:n});};
 document.addEventListener('click',e=>{const button=e.target.closest('[data-recall]');if(button){e.preventDefault();e.stopPropagation();recall(button.dataset.recall);}});
-document.addEventListener('change',e=>{if(e.target.matches('[data-worker]'))syncSelection();});
+document.addEventListener('change',e=>{if(e.target.matches('[data-worker]'))rememberSelection();});
 paint();setInterval(()=>{if(state.status==='calling')refresh();},5000);
 </script>
 {% endblock %}
