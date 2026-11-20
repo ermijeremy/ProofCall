@@ -10,6 +10,7 @@ from app.db.session import SessionLocal
 from app.services.batch_service import run_due_retries, run_due_rounds
 from app.services.call_service import sync_active_calls
 from app.services.teleexpert_service import drain_failed_events
+from app.services.recruitment_service import reconcile as reconcile_recruitment
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ class InterviewScheduler:
         while not self._stop.is_set():
             try:
                 with SessionLocal() as db:
+                    reconcile_recruitment(db)
                     # Rounds the administrator scheduled in words: "tomorrow at
                     # three". The same poll fires them, because a promise made in
                     # the thread has to be kept without anybody opening the page.

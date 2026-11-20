@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}BeSingularity recruitment · ProofCall{% endblock %}
+{% block chrome %}
+<header class="page-head"><a class="back-link" href="/">← ProofCall</a><div><h1>BeSingularity recruitment</h1><p class="muted">Invite a contact to sales training and record their response.</p></div></header>
+{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/recruitment.css">
+<div class="recruitment-app">
+  <p class="demo-banner">Sample settings are provided for rehearsal. Review the prompt, location, date, session times and contact source before placing a call.</p>
+  <p id="demo-notice" role="status" aria-live="polite" hidden></p>
+  <form id="demo-access" class="round-panel demo-access">
+    <label for="demo-token">Operator access token</label>
+    <input id="demo-token" type="password" autocomplete="off" required placeholder="Enter the token configured for this demo">
+    <button class="primary-button" type="submit">Open workspace</button>
+    <p class="muted">The token stays in this page's memory. TeleExpert credentials remain on the server.</p>
+  </form>
+  <div id="demo-workspace" hidden>
+    <section class="round-panel demo-toolbar">
+      <label>Campaign <select id="demo-campaign"></select></label>
+      <button id="demo-new" class="ghost-button" type="button">New campaign</button>
+      <button id="demo-lock" class="ghost-button" type="button">Lock workspace</button>
+      <p id="demo-connection" class="muted"></p>
+    </section>
+    <div class="demo-grid">
+      <section class="round-panel">
+        <h2>1. Prepare the invitation</h2>
+        <form id="demo-config">
+          <label>Campaign name <input name="name" required maxlength="200"></label>
+          <label>Training location <input name="training_location" required maxlength="500"></label>
+          <label>Training date (Gregorian) <input name="training_date" type="date" required></label>
+          <div class="demo-sessions">
+            <label>First session <input name="session_one" required maxlength="100"></label>
+            <label>Second session <input name="session_two" required maxlength="100"></label>
+          </div>
+          <label>Clock convention <select name="clock_convention"><option value="24h">24-hour time</option><option value="ethiopian">Ethiopian clock</option></select></label>
+          <p class="muted">Timezone: Africa/Addis_Ababa. State morning/afternoon clearly in the session wording.</p>
+          <label>Default contact-source wording <input name="contact_source" required maxlength="500"></label>
+          <label>Conversation prompt <textarea name="prompt" rows="18" minlength="50" maxlength="10000" required></textarea></label>
+          <p class="muted">Editable variables: <code>{% raw %}{{recipient_name}}, {{contact_source}}, {{training_location}}, {{training_date}}, {{session_one}}, {{session_two}}, {{clock_convention}}, {{timezone}}{% endraw %}</code>.</p>
+          <button class="primary-button" type="submit">Save campaign</button>
+        </form>
+        <div class="demo-toolbar"><button id="demo-prepare" class="ghost-button" type="button">Prepare assistant</button><span id="demo-assistant" class="muted"></span></div>
+        <p class="muted">Saving changes requires preparing that revision again. Preparation checks the assistant without placing a call.</p>
+      </section>
+      <section class="round-panel">
+        <h2>2. Choose a contact</h2>
+        <form id="demo-lead">
+          <label>Name (optional) <input name="name" maxlength="255"></label>
+          <label>Phone number <input name="phone_number" type="tel" placeholder="+251…" required pattern="\+[1-9][0-9]{6,14}"></label>
+          <label>Actual contact source <input name="contact_source" required maxlength="500"></label>
+          <label class="demo-check"><input name="contact_permission" type="checkbox" required> I have permission to call this contact.</label>
+          <button class="ghost-button" type="submit">Add contact</button>
+        </form>
+        <div id="demo-leads"></div>
+        <button id="demo-call" class="primary-button" type="button" disabled>Review and place one call</button>
+        <p class="muted">This places a real phone call through TeleExpert. There are no automatic redials. Requested callbacks are recorded for a person to arrange.</p>
+      </section>
+    </div>
+    <section class="round-panel"><h2>3. Call progress and results</h2><p class="muted">Attendance is an intention, not confirmed registration. AI-reported results need operator review before follow-up.</p><div id="demo-calls"></div></section>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}<script src="/static/recruitment.js" defer></script>{% endblock %}

@@ -27,6 +27,13 @@ templates = Jinja2Templates(directory="app/dashboard/templates")
 templates.env.globals["questions"] = fixed_question_set()
 
 
+@router.get("/recruitment")
+def recruitment_demo(request: Request):
+    # The shell has no private bootstrap data. Every data/action endpoint
+    # requires the separate recruitment operator credential.
+    return templates.TemplateResponse(request=request, name="recruitment.html", context={})
+
+
 @router.get("/")
 def home(request: Request, db: Session = Depends(get_db)):
     """Every company, most recently active first. No chat interface here.
