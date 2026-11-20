@@ -1,0 +1,20 @@
+.recruitment-app { max-width: 1300px; margin: 0 auto; }
+.recruitment-app .round-panel { padding: 24px; margin: 16px 0; }
+.demo-grid, .demo-sessions { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.demo-grid { grid-template-columns: 3fr 2fr; }
+.recruitment-app label { display: grid; gap: 6px; margin: 14px 0; font-weight: 500; }
+.recruitment-app input:not([type=checkbox]):not([type=radio]), .recruitment-app select, .recruitment-app textarea { width: 100%; box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px; background: #fff; color: #172b35; font: inherit; }
+.recruitment-app textarea { resize: vertical; line-height: 1.6; }
+.recruitment-app .demo-check { display: flex; align-items: center; gap: 10px; }
+.demo-toolbar { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+.demo-toolbar label { flex: 1; min-width: 180px; }
+.demo-banner, #demo-notice { padding: 16px; border-radius: 8px; background: #fff7df; color: #624819; }
+#demo-notice[data-error=true] { background: #feeceb; color: #8d2323; }
+.demo-contact, .demo-call-card { padding: 16px 0; border-bottom: 1px solid #e2e8f0; }
+.demo-call-card p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.demo-call-card button { margin: 6px 10px 6px 0; }
+.demo-call-card dt { font-weight: 600; margin-top: 10px; }
+.demo-call-card dd { margin-left: 0; white-space: pre-wrap; }
+.demo-access { max-width: 560px; }
+.recruitment-app button:disabled { opacity: .5; cursor: not-allowed; }
+@media (max-width: 850px) { .demo-grid, .demo-sessions { grid-template-columns: 1fr; } }

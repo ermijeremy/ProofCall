@@ -19,6 +19,12 @@ class TeleExpertError(RuntimeError):
     """Raised when TeleExpert cannot accept or return a call."""
 
 
+class TeleExpertHTTPError(TeleExpertError):
+    def __init__(self, message: str, status_code: int):
+        super().__init__(message)
+        self.status_code = status_code
+
+
 class TeleExpertClient:
     # A provider may accept a POST and close the connection before its 202
     # reaches us. Retrying a POST is safe only when CallProof supplied the same
@@ -42,14 +48,14 @@ class TeleExpertClient:
             headers={"Authorization": f"Bearer {self.api_key}"} if self.api_key else {},
         )
 
-    def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+    def _request(self, method: str, path: str, *, retry_post: bool = True, **kwargs: Any) -> dict[str, Any]:
         if not self.base_url:
             raise TeleExpertError("TeleExpert base URL is not configured")
         url = f"{self.base_url}{path}" if path.startswith("/") else path
         headers = kwargs.get("headers") or {}
         has_idempotency_key = isinstance(headers, dict) and bool(headers.get("Idempotency-Key"))
         retryable = method.upper() in {"GET", "HEAD", "OPTIONS"} or (
-            method.upper() == "POST" and has_idempotency_key
+            method.upper() == "POST" and has_idempotency_key and retry_post
         )
         attempts = self._TRANSPORT_RETRIES + 1 if retryable else 1
         try:
@@ -57,7 +63,10 @@ class TeleExpertClient:
                 try:
                     response = self.http_client.request(method, url, **kwargs)
                     response.raise_for_status()
-                    return response.json()
+                    payload = response.json()
+                    if not isinstance(payload, dict):
+                        raise ValueError("TeleExpert response must be an object")
+                    return payload
                 except httpx.HTTPStatusError:
                     # A real provider response (400/401/500/etc.) is not a
                     # transport failure. Preserve its exact error and do not
@@ -78,8 +87,8 @@ class TeleExpertClient:
             if len(detail) > 500:
                 detail = detail[:500] + "..."
             suffix = f": {detail}" if detail else ""
-            raise TeleExpertError(
-                f"TeleExpert request failed ({exc.response.status_code}){suffix}"
+            raise TeleExpertHTTPError(
+                f"TeleExpert request failed ({exc.response.status_code}){suffix}", exc.response.status_code
             ) from exc
         except (httpx.HTTPError, ValueError) as exc:
             raise TeleExpertError(f"TeleExpert request failed: {exc}") from exc
@@ -138,6 +147,25 @@ class TeleExpertClient:
 
     def get_call(self, call_id: str) -> dict[str, Any]:
         return self._request("GET", f"/v1/calls/{call_id}")
+
+    def create_assistant(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/v1/assistants", json=payload)
+
+    def provider_capabilities(self) -> dict[str, Any]:
+        return self._request("GET", "/v1/provider-capabilities")
+
+    def preview_assistant(self, assistant_id: str, version: int, variables: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", f"/v1/assistants/{assistant_id}/preview",
+                             json={"version": version, "variables": variables})
+
+    def submit_assistant_call(self, payload: dict[str, Any], request_id: str) -> dict[str, Any]:
+        """Submit an immutable request against the Vapi-parity idempotency contract.
+
+        The recruitment service persists the body before invoking this method and
+        limits replay to the provider's advertised idempotency window.
+        """
+        return self._request("POST", "/v1/calls", json=payload, retry_post=False,
+                             headers={"Idempotency-Key": f"proofcall-recruitment:{request_id}"})
 
     def get_transcript(self, call_id: str) -> dict[str, Any]:
         return self._request("GET", f"/v1/calls/{call_id}/transcript")

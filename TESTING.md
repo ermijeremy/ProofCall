@@ -3,6 +3,77 @@
 Everything here is runnable from the repository root. The default suite needs no
 API key, no network, and no phone.
 
+## Recruitment demo (issue #23)
+
+Work branch: `feat/besingularity-recruitment-demo`. TeleExpert target:
+`feat/vapi-parity-control-plane`. No TeleExpert source changes are required by
+this integration. The recruitment console is independent of the old fixed KPI
+interview and its test expectations.
+
+1. Install `requirements.txt` and use a fresh demo database. Configure
+   `CALLPROOF_DATABASE_URL=sqlite:///./recruitment-demo.db`,
+   `TELEEXPERT_BASE_URL`, and a commercial tenant `TELEEXPERT_API_KEY` with
+   `assistants:read`, `assistants:write`, `calls:read` and `calls:write` scopes.
+   The legacy `TELEXPERT_*` connection names still work.
+2. Set `PROOFCALL_RECRUITMENT_OPERATOR_TOKEN` to a random secret of at least
+   32 characters. For example, generate one locally with
+   `python3 -c 'import secrets; print(secrets.token_urlsafe(32))'`.
+3. Start ProofCall on loopback, for example
+   `.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8766`, then open
+   `http://127.0.0.1:8766/recruitment`. Use HTTPS and an authenticated boundary
+   when exposing the application; legacy endpoints remain covered by issue #6.
+4. Unlock the console with the operator token. Review all sample settings,
+   particularly location, Gregorian date, clock convention, session wording and
+   the truthful contact source. Edit the full prompt in the same form. Save,
+   then choose **Prepare assistant**. This creates/checks a tenant assistant,
+   pins its exact version, and places no phone call.
+5. TeleExpert must have a compatible Gemini Live provider, an enrolled/armed
+   gateway in the tenant's default group, and post-call analysis enabled. Its
+   current server config creates the analyzer when `GEMINI_API_KEY` and
+   `TELEEXPERT_ANALYSIS_MODEL` are configured; the model must actually be
+   available to that deployment. Preparation checks the profile; submission can
+   still reject unavailable gateways or analysis prerequisites. Review the
+   tenant's calling/recording policy before a controlled real call. ProofCall
+   requests text results and does not download recordings for this demo;
+   TeleExpert owns its recording policy.
+6. Add only a contact you have permission to call. Select them and use
+   **Review and place one call**. The confirmation repeats the number and
+   invitation settings. One intended call has no automatic dial retries.
+7. Progress includes `processing` after hangup. The result reports interest,
+   work preference, attendance intent/session, verbatim callback requests and
+   questions for a person. Attendance is not registration. Callback requests
+   are not automatically scheduled. Missing or malformed analysis stays under
+   review; **Refresh result** can recover a later corrected result.
+
+Callbacks are optional: set `PROOFCALL_RECRUITMENT_WEBHOOK_URL` to a reachable
+URL ending in `/api/recruitment/webhook` and set
+`TELEEXPERT_WEBHOOK_SECRET` (or legacy `TELEXPERT_WEBHOOK_SECRET`) to a 32+
+character secret. TeleExpert must allow that callback destination. Without a
+callback, the console and enabled scheduler poll existing call IDs.
+
+If submission acceptance is unknown, use **Check the same submission**. The
+stored request/key must stay unchanged. ProofCall refuses replay after its
+snapshot of the provider's advertised TTL (with safety margin), or against a
+different credential/connection context. Reconcile expired unknown calls in
+TeleExpert before attempting another call. A stuck `submitting` request waits
+two minutes before reconciliation, allowing the original HTTP request to finish.
+
+Offline regression command:
+
+```sh
+.venv/bin/python -m pytest tests/integration/test_recruitment_demo.py tests/unit/test_teleexpert_client.py -q
+node --check app/dashboard/static/recruitment.js
+node tests/js/recruitment.test.cjs
+```
+
+These checks use an HTTP mock of the Vapi-parity contract and a temporary SQLite
+database, with no real numbers contacted. Before marking the demo ready, record
+controlled phone/Amharic listening results for: interested and attendance intent;
+uninterested; busy/callback; unknown salary/fee question; wrong person; stop/do
+not contact; no answer/disconnection. Check both the audible behavior and the
+result shown in ProofCall. Automated tests do not establish device audio quality,
+latency, prompt delivery, actual termination or business-script approval.
+
 ## Setup, once
 
 ```sh
