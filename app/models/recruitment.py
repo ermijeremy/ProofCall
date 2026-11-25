@@ -14,10 +14,34 @@ class RecruitmentCampaign(Base):
 
     campaign_id: Mapped[str] = mapped_column(String(100), primary_key=True)
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    company_id: Mapped[str | None] = mapped_column(ForeignKey("employers.company_id"), nullable=True)
     config: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     assistant_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     assistant_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class CompanyUser(Base):
+    __tablename__ = "company_users"
+    username: Mapped[str] = mapped_column(String(80), primary_key=True)
+    company_id: Mapped[str] = mapped_column(ForeignKey("employers.company_id"), nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    must_change_password: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class CompanySession(Base):
+    __tablename__ = "company_sessions"
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    username: Mapped[str] = mapped_column(ForeignKey("company_users.username"), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class LoginAttempt(Base):
+    __tablename__ = "company_login_attempts"
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    window_started: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
 class RecruitmentLead(Base):

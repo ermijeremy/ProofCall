@@ -17,16 +17,14 @@ from app.db.session import get_db
 from app.integrations.teleexpert_client import TeleExpertClient, TeleExpertError
 from app.models.recruitment import RecruitmentCampaign, RecruitmentEvent
 from app.schemas.recruitment import (RecruitmentConfig, RecruitmentDialInput, RecruitmentLeadInput,
-                                     RecruitmentUpdate, assistant_payload)
+                                     RecruitmentImportInput, RecruitmentUpdate, assistant_payload)
 from app.services import recruitment_service as service
+from app.services import recruitment_import
+from app.core.company_access import workspace_access
+from app.models.employer import Employer
 
 
-def operator_access(authorization: str | None = Header(default=None)) -> None:
-    token = settings.recruitment_operator_token
-    if len(token) < 32:
-        raise HTTPException(status_code=503, detail="Recruitment operator access is not configured")
-    if not authorization or not hmac.compare_digest(authorization.encode(), f"Bearer {token}".encode()):
-        raise HTTPException(status_code=401, detail="Enter the recruitment operator token")
+operator_access = workspace_access
 
 
 class PrivateRoute(APIRoute):
@@ -68,23 +66,43 @@ def operation(function, *args, **kwargs):
 
 
 @router.get("/defaults")
-def defaults():
+def defaults(request: Request, db: Session = Depends(get_db)):
     config = RecruitmentConfig()
+    company_id = request.path_params.get('company_id')
+    if company_id:
+        company = db.get(Employer, company_id)
+        if company.name.lower() != 'besingularity':
+            config = RecruitmentConfig(name=company.name + ' calls', company_name=company.name,
+                purpose='questionnaire', questions=['What would you like our team to help you with?'],
+                prompt='Call {{recipient_name}} on behalf of the configured company. Explain the actual contact source: {{contact_source}}. Follow the configured questions, one at a time. Use only company-provided facts. If an answer is unclear, clarify once. Stop on request and do not invent answers or promises.',
+                greeting='Hello {{recipient_name}}, I am an AI telephone assistant calling for ' + company.name + '. Is now a good time to speak?',
+                contact_source='Replace with the actual source and permission to contact this person')
     return {"config": config.model_dump(mode="json"), "sample_settings": True,
             "assistant_payload": assistant_payload(config),
+            "company_name": config.company_name,
             "connection_configured": bool(settings.teleexpert_base_url and settings.teleexpert_api_key),
             "webhook_configured": bool(settings.recruitment_webhook_url and settings.teleexpert_webhook_secret)}
 
 
 @router.get("/campaigns")
-def list_campaigns(db: Session = Depends(get_db)):
-    values = db.scalars(select(RecruitmentCampaign).order_by(RecruitmentCampaign.created_at.desc())).all()
+def list_campaigns(request: Request, include_archived: bool = False, db: Session = Depends(get_db)):
+    query = select(RecruitmentCampaign).order_by(RecruitmentCampaign.created_at.desc())
+    if not include_archived:
+        query = query.where(RecruitmentCampaign.archived.is_(False))
+    if request.path_params.get('company_id'):
+        query = query.where(RecruitmentCampaign.company_id == request.path_params['company_id'])
+    values = db.scalars(query).all()
     return {"campaigns": [service.campaign_view(value) for value in values]}
 
 
+@router.get("/connection")
+def connection(client=Depends(provider_client)):
+    return operation(service.connection_status, client)
+
+
 @router.post("/campaigns", status_code=201)
-def create_campaign(data: RecruitmentConfig, db: Session = Depends(get_db)):
-    return service.campaign_view(operation(service.save_campaign, db, data))
+def create_campaign(data: RecruitmentConfig, request: Request, db: Session = Depends(get_db)):
+    return service.campaign_view(operation(service.save_campaign, db, data, company_id=request.path_params.get('company_id')))
 
 
 @router.put("/campaigns/{campaign_id}")
@@ -115,6 +133,21 @@ def add_contact(campaign_id: str, data: RecruitmentLeadInput, db: Session = Depe
     return {"lead_id": value.lead_id}
 
 
+@router.post("/campaigns/{campaign_id}/leads/import/preview")
+async def preview_contacts(campaign_id: str, request: Request, db: Session = Depends(get_db)):
+    content = bytearray()
+    async for chunk in request.stream():
+        if len(content) + len(chunk) > recruitment_import.MAX_BYTES:
+            raise HTTPException(status_code=413, detail="Excel file must be 2 MB or smaller")
+        content.extend(chunk)
+    return operation(recruitment_import.preview_excel, db, campaign_id, bytes(content))
+
+
+@router.post("/campaigns/{campaign_id}/leads/import", status_code=201)
+def import_contacts(campaign_id: str, data: RecruitmentImportInput, db: Session = Depends(get_db)):
+    return operation(recruitment_import.import_contacts, db, campaign_id, data)
+
+
 @router.post("/campaigns/{campaign_id}/leads/{lead_id}/call", status_code=202)
 def dial(campaign_id: str, lead_id: str, data: RecruitmentDialInput,
          db: Session = Depends(get_db), client=Depends(provider_client)):
@@ -136,6 +169,11 @@ def sync(request_id: str, db: Session = Depends(get_db), client=Depends(provider
 @router.post("/calls/{request_id}/cancel")
 def cancel(request_id: str, db: Session = Depends(get_db), client=Depends(provider_client)):
     return service.call_view(operation(service.cancel_call, db, request_id, client))
+
+
+@router.post("/calls/{request_id}/analysis/retry")
+def retry_analysis(request_id: str, db: Session = Depends(get_db), client=Depends(provider_client)):
+    return service.call_view(operation(service.retry_call_analysis, db, request_id, client))
 
 
 @webhook_router.post("/webhook")

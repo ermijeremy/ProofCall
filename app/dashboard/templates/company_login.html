@@ -1,0 +1,23 @@
+{% extends 'base.html' %}
+{% block title %}Company sign in · ProofCall{% endblock %}
+{% block chrome %}<header class="page-head"><a class="brand-link" href="/login">ProofCall</a><h1>Company sign in</h1></header>{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/recruitment.css">
+<div class="recruitment-app">
+<p id="auth-notice" role="status" aria-live="polite"></p>
+<form id="company-login" class="round-panel demo-access">
+<label>Username <input name="username" autocomplete="username" maxlength="80" required></label>
+<label>Password <input name="password" type="password" autocomplete="current-password" maxlength="256" required></label>
+<button type="submit" class="primary-button">Sign in</button>
+<p class="muted">Use the initial credentials provided to your company. You will choose your own password on first sign in.</p>
+</form>
+<form id="company-password" class="round-panel demo-access" hidden>
+<h2>Choose your password</h2><p id="password-reason">Change your temporary password to open your workspace.</p>
+<label>Current password <input name="current_password" type="password" autocomplete="current-password" maxlength="256" required></label>
+<label>New password <input name="new_password" type="password" autocomplete="new-password" minlength="12" maxlength="256" required></label>
+<label>Confirm new password <input name="confirm_password" type="password" autocomplete="new-password" minlength="12" maxlength="256" required></label>
+<button type="submit" class="primary-button">Save password and open workspace</button>
+</form>
+</div>
+{% endblock %}
+{% block scripts %}<script src="/static/company-login.js" defer></script>{% endblock %}

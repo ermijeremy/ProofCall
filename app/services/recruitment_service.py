@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.integrations.teleexpert_client import TeleExpertClient, TeleExpertError, TeleExpertHTTPError
 from app.models.recruitment import RecruitmentCampaign, RecruitmentCall, RecruitmentEvent, RecruitmentLead
-from app.schemas.recruitment import RecruitmentConfig, RecruitmentLeadInput, RecruitmentOutcome, assistant_payload
+from app.schemas.recruitment import RecruitmentConfig, RecruitmentLeadInput, RecruitmentOutcome, assistant_payload, validate_campaign_result
 
 TERMINAL = {"completed", "failed", "cancelled", "rejected"}
 PROVIDER_STATES = {"queued", "rate_wait", "dispatching", "dialing", "not_answered", "retry_wait",
@@ -60,6 +60,24 @@ def context_hash(client: TeleExpertClient) -> str:
     return hashlib.sha256(json.dumps(context).encode()).hexdigest()
 
 
+def connection_status(client: TeleExpertClient) -> dict:
+    connection_ready(client)
+    capabilities = client.provider_capabilities()
+    gateways = client.gateways().get("gateways")
+    if not isinstance(gateways, list) or any(not isinstance(g, dict) for g in gateways):
+        raise TeleExpertError("Invalid gateway status response")
+    idle = sum(g.get("status") == "idle" for g in gateways)
+    online = sum(g.get("status") in {"idle", "busy"} for g in gateways)
+    provider = next((p for p in capabilities.get("providers", [])
+                     if isinstance(p, dict) and p.get("id") == "gemini_live"), {})
+    voices = provider.get("voices", [])
+    voices = [v for v in voices if isinstance(v, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,100}", v)] if isinstance(voices, list) else []
+    return {"status": "ready" if idle else "busy" if online else "offline",
+            "gateway_count": online, "idle_gateway_count": idle,
+            "provider": capabilities.get("default_provider", "unknown"),
+            "voices": voices, "default_voice": provider.get("default_voice", "")}
+
+
 def replay_deadline(client: TeleExpertClient, created_at: datetime) -> datetime:
     capabilities = client.provider_capabilities()
     submission = capabilities.get("call_submission")
@@ -78,9 +96,9 @@ def variables(config: RecruitmentConfig, lead: RecruitmentLead | None = None) ->
 
 
 def save_campaign(db: Session, config: RecruitmentConfig, campaign_id: str | None = None,
-                  expected_revision: int | None = None) -> RecruitmentCampaign:
+                  expected_revision: int | None = None, company_id: str | None = None) -> RecruitmentCampaign:
     if campaign_id is None:
-        value = RecruitmentCampaign(campaign_id=f"recruit_{uuid4().hex}", config=config.model_dump(mode="json"))
+        value = RecruitmentCampaign(campaign_id=f"recruit_{uuid4().hex}", company_id=company_id, config=config.model_dump(mode="json"))
         db.add(value)
         db.commit()
         return value
@@ -150,9 +168,12 @@ def new_call(db: Session, campaign_id: str, lead_id: str, request_id: str,
         return existing
     current = campaign(db, campaign_id)
     lead = db.get(RecruitmentLead, lead_id)
+    if current.archived:
+        raise RecruitmentConflict("This campaign is archived. Select an active campaign before calling")
     if lead is None or lead.campaign_id != campaign_id:
         raise LookupError("Contact not found in this campaign")
-    suppressed = db.scalar(select(RecruitmentLead.lead_id).where(
+    suppressed = db.scalar(select(RecruitmentLead.lead_id).join(RecruitmentCampaign).where(
+        RecruitmentCampaign.company_id == current.company_id,
         RecruitmentLead.phone_number == lead.phone_number, RecruitmentLead.do_not_contact.is_(True)).limit(1))
     if not lead.contact_permission or suppressed:
         raise RecruitmentConflict("This contact is not eligible to call")
@@ -165,7 +186,7 @@ def new_call(db: Session, campaign_id: str, lead_id: str, request_id: str,
     payload = {
         "phone_number": lead.phone_number, "assistant_id": current.assistant_id,
         "assistant_version": current.assistant_version, "variables": variables(config, lead),
-        "task": "Run the configured BeSingularity recruitment invitation. Record attendance intent, not registration.",
+        "task": ("Run the configured company questionnaire and record only actual answers." if config.purpose == 'questionnaire' else "Run the configured BeSingularity recruitment invitation. Record attendance intent, not registration."),
         "response_format": "text", "retries": 0, "answer_timeout_seconds": 45,
         "consent_evidence": {"captured_at": lead.created_at.replace(tzinfo=UTC).timestamp(),
                              "method": "operator_attestation", "reference": lead.contact_source},
@@ -289,13 +310,26 @@ def apply_status(db: Session, current: RecruitmentCall, payload: dict, *, author
                     if (payload.get("assistant_id") != current.request_payload["assistant_id"] or
                             payload.get("assistant_version") != current.request_payload["assistant_version"]):
                         raise ValueError("Unexpected assistant version")
-                    outcome = RecruitmentOutcome.model_validate(result.get("analysis"))
+                    outcome = validate_campaign_result(RecruitmentConfig.model_validate(
+                        {k: v for k, v in current.campaign_snapshot.items() if k != 'revision'}), result.get("analysis"))
                     values.update(result=outcome.model_dump(), result_state="ready", active_lead_id=None)
                 except (ValidationError, ValueError):
                     if current.result_state != "ready":
+                        analysis_error = result.get("analysis_error")
+                        errors = {
+                            "analysis provider temporarily unavailable": "The call ended, but TeleExpert's analysis provider is temporarily unavailable. Retry analysis to reprocess the saved transcript without another call.",
+                            "analysis provider timed out": "The call ended, but TeleExpert's analysis timed out. Retry analysis to reprocess the saved transcript without another call.",
+                            "analysis provider request failed": "The call ended, but TeleExpert could not generate analysis. Retry analysis to reprocess the saved transcript without another call.",
+                        }
                         values.update(result_state="needs_review" if authoritative else "pending", error=(
-                            "The conversation ended, but valid recruitment analysis from the pinned assistant "
-                            "is unavailable. Review in TeleExpert."))
+                            errors.get(analysis_error, "The conversation ended, but valid recruitment analysis from the pinned assistant "
+                            "is unavailable. Review in TeleExpert.") if isinstance(analysis_error, str) else
+                            "The conversation ended, but valid recruitment analysis from the pinned assistant is unavailable. Review in TeleExpert."))
+                    # A confirmed ended carrier call no longer owns the contact's
+                    # active-call slot, even when its analysis still needs review.
+                    # A webhook alone does not release an uncertain submission.
+                    if authoritative:
+                        values["active_lead_id"] = None
             else:
                 values.update(active_lead_id=None, result_state="not_available", error=("Call cancelled." if status == "cancelled"
                               else "The call did not complete. Check TeleExpert for the technical reason."))
@@ -308,7 +342,9 @@ def apply_status(db: Session, current: RecruitmentCall, payload: dict, *, author
             continue
         if outcome and outcome.do_not_contact:
             lead = db.get(RecruitmentLead, current.lead_id)
+            owner = campaign(db, current.campaign_id).company_id
             db.execute(update(RecruitmentLead).where(RecruitmentLead.phone_number == lead.phone_number)
+                       .where(RecruitmentLead.campaign_id.in_(select(RecruitmentCampaign.campaign_id).where(RecruitmentCampaign.company_id == owner)))
                        .values(do_not_contact=True))
         db.commit()
         db.refresh(current)
@@ -328,6 +364,17 @@ def sync_call(db: Session, request_id: str, client: TeleExpertClient) -> Recruit
         current.error = "Status could not be refreshed. The existing call has not been redialed."
         db.commit()
         return current
+
+
+def retry_call_analysis(db: Session, request_id: str, client: TeleExpertClient) -> RecruitmentCall:
+    current = call(db, request_id)
+    if current.status != "completed" or not current.provider_call_id:
+        raise RecruitmentConflict("Analysis retry requires a completed provider call")
+    if current.context_hash != context_hash(client):
+        raise RecruitmentConflict("Restore the original provider context before retrying analysis")
+    if current.result_state == "ready":
+        return current
+    return apply_status(db, current, client.retry_analysis(current.provider_call_id), authoritative=True)
 
 
 def cancel_call(db: Session, request_id: str, client: TeleExpertClient) -> RecruitmentCall:
@@ -363,7 +410,7 @@ def reconcile(db: Session, client: TeleExpertClient | None = None) -> None:
     drain_events(db)
     pending = db.scalars(select(RecruitmentCall).where(
         RecruitmentCall.provider_call_id.is_not(None), RecruitmentCall.active_lead_id.is_not(None),
-        (~RecruitmentCall.status.in_(TERMINAL)) | (RecruitmentCall.result_state == "pending"))).all()
+        (~RecruitmentCall.status.in_(TERMINAL)) | (RecruitmentCall.result_state.in_(("pending", "needs_review"))))).all()
     if not pending:
         return
     owns_client = client is None
@@ -382,12 +429,15 @@ def reconcile(db: Session, client: TeleExpertClient | None = None) -> None:
 
 
 def campaign_view(current: RecruitmentCampaign) -> dict:
-    return {"campaign_id": current.campaign_id, "revision": current.revision, "config": current.config,
+    return {"campaign_id": current.campaign_id, "revision": current.revision, "archived": current.archived, "config": current.config,
             "assistant_id": current.assistant_id, "assistant_version": current.assistant_version}
 
 
 def call_view(current: RecruitmentCall) -> dict:
     return {"request_id": current.request_id, "lead_id": current.lead_id,
+            "purpose": current.campaign_snapshot.get('purpose', 'recruitment'),
+            "questions": current.campaign_snapshot.get('questions', []),
+            "company_name": current.campaign_snapshot.get('company_name', 'BeSingularity'),
             "provider_call_id": current.provider_call_id, "status": current.status,
             "outstanding": current.active_lead_id is not None,
             "result_state": current.result_state, "result": current.result, "error": current.error,

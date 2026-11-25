@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+{% block title %}Companies · ProofCall{% endblock %}
+{% block chrome %}<header class="page-head"><a class="brand-link" href="/">ProofCall</a><h1>Company workspaces</h1><a href="/login">Company sign in</a></header>{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/recruitment.css">
+<div class="recruitment-app">
+<p id="admin-notice" role="status" aria-live="polite"></p>
+<form id="admin-login" class="round-panel demo-access"><label>Administrator token <input id="admin-token" type="password" required autocomplete="off"></label><button class="primary-button">Open administration</button></form>
+<div id="admin-workspace" hidden>
+<section class="round-panel"><h2>Companies</h2><p class="muted">Each company has its own login, campaigns, questions, contacts and call results.</p><div id="company-list"></div></section>
+<form id="admin-create" class="round-panel demo-access"><h2>Add a company</h2><label>Company name <input name="name" maxlength="255" required></label><label>Initial username <input name="username" minlength="3" maxlength="80" pattern="[A-Za-z0-9_.@-]+" autocomplete="off" required></label><button class="primary-button">Create company and initial login</button></form>
+<section id="initial-credentials" class="round-panel" hidden><h2>Initial login — copy before closing</h2><p class="muted">Give these credentials and the workspace link to the company. They must change the password on first sign in. A reset ends existing sessions.</p><pre id="credentials-text"></pre><button id="hide-credentials" class="ghost-button">Hide credentials</button></section>
+<button id="admin-lock" class="ghost-button">Lock administration</button>
+</div></div>
+{% endblock %}
+{% block scripts %}<script src="/static/company-admin.js" defer></script>{% endblock %}

@@ -2,6 +2,8 @@
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
+from app.core.company_access import is_admin
 
 from app.api.router import api_router
 from app.api.routes import pages
@@ -17,6 +19,20 @@ app.include_router(api_router)
 app.include_router(pages.router)
 app.mount("/static", StaticFiles(directory="app/dashboard/static"), name="static")
 scheduler = InterviewScheduler()
+
+
+@app.middleware('http')
+async def protect_legacy_admin_apis(request, call_next):
+    path = request.url.path
+    scoped = any(path == p or path.startswith(p + '/') for p in (
+        '/api/recruitment', '/api/workspaces', '/api/company-workspaces', '/api/company-auth'))
+    if path.startswith('/api/') and not scoped and not is_admin(request.headers.get('authorization')):
+        return JSONResponse({'detail': 'Administrator access required'}, status_code=401,
+                            headers={'Cache-Control': 'no-store'})
+    response = await call_next(request)
+    if path.startswith('/api/') or path.startswith('/companies/') or path == '/login':
+        response.headers['Cache-Control'] = 'no-store'
+    return response
 
 
 @app.on_event("startup")

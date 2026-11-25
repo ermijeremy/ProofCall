@@ -55,6 +55,7 @@ def _upgrade_legacy_sqlite_schema() -> None:
         "small_cell_threshold": "INTEGER NOT NULL DEFAULT 5",
     }
     table_upgrades = {
+        "recruitment_campaigns": {"archived": "BOOLEAN NOT NULL DEFAULT 0", "company_id": "VARCHAR(100) REFERENCES employers(company_id)"},
         "employers": employer_columns,
         "teleexpert_calls": {
             "answer_timeout_seconds": "INTEGER NOT NULL DEFAULT 45",

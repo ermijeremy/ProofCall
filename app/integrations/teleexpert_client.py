@@ -148,11 +148,17 @@ class TeleExpertClient:
     def get_call(self, call_id: str) -> dict[str, Any]:
         return self._request("GET", f"/v1/calls/{call_id}")
 
+    def retry_analysis(self, call_id: str) -> dict[str, Any]:
+        return self._request("POST", f"/v1/calls/{call_id}/analysis/retry", json={}, retry_post=False)
+
     def create_assistant(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/v1/assistants", json=payload)
 
     def provider_capabilities(self) -> dict[str, Any]:
         return self._request("GET", "/v1/provider-capabilities")
+
+    def gateways(self) -> dict[str, Any]:
+        return self._request("GET", "/v1/gateways")
 
     def preview_assistant(self, assistant_id: str, version: int, variables: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", f"/v1/assistants/{assistant_id}/preview",

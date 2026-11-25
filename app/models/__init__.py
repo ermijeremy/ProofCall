@@ -8,7 +8,7 @@ from app.models.employer import Employer
 from app.models.evidence import WorkerEvidence, WorkerEvidenceRecord
 from app.models.interview import InterviewSchedule
 from app.models.webhook import TeleExpertWebhookEvent
-from app.models.recruitment import RecruitmentCampaign, RecruitmentLead, RecruitmentCall, RecruitmentEvent
+from app.models.recruitment import CompanyUser, CompanySession, LoginAttempt, RecruitmentCampaign, RecruitmentLead, RecruitmentCall, RecruitmentEvent
 
 __all__ = [
     "RecruitmentCampaign",

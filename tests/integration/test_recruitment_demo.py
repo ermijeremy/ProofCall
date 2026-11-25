@@ -9,6 +9,7 @@ import hashlib
 import hmac
 import json
 import time
+from io import BytesIO
 from datetime import datetime, timedelta
 from uuid import uuid4
 
@@ -18,8 +19,10 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from openpyxl import Workbook
 
 from app.api.routes import pages, recruitment
+from app.api.routes import workspaces, company_auth
 from app.core.config import settings
 from app.db.session import get_db
 from app.integrations.teleexpert_client import TeleExpertClient
@@ -49,16 +52,20 @@ class Provider:
         self.bodies = {}
         self.submissions = 0
         self.executions = 0
+        self.analysis_retries = 0
         self.definition = None
         self.lose_response = False
         self.reject = False
         self.ttl = 86400
+        self.gateways = [{"status": "idle"}]
 
     def handle(self, request):
         path = request.url.path
         assert request.headers["Authorization"] == "Bearer FAKE_PROVIDER"
+        if path == "/v1/gateways":
+            return httpx.Response(200, json={"gateways": self.gateways})
         if path == "/v1/provider-capabilities":
-            return httpx.Response(200, json={"call_submission": {"idempotency_ttl_seconds": self.ttl}})
+            return httpx.Response(200, json={"providers": [{"id": "gemini_live", "voices": ["Kore", "Puck"], "default_voice": "Kore"}], "call_submission": {"idempotency_ttl_seconds": self.ttl}})
         body = json.loads(request.content) if request.content else {}
         if path == "/v1/assistants":
             assert set(body) == {"name", "definition"}
@@ -97,6 +104,11 @@ class Provider:
                 self.lose_response = False
                 raise httpx.ReadError("accepted then disconnected", request=request)
             return httpx.Response(202, json=self.calls[key])
+        if path.endswith("/analysis/retry") and request.method == "POST":
+            self.analysis_retries += 1
+            value = next(v for v in self.calls.values() if v["id"] == path.split('/')[-3])
+            value['result'] = {'analysis': analysis()}
+            return httpx.Response(200, json=value)
         if path.startswith("/v1/calls/"):
             value = next(item for item in self.calls.values() if item["id"] == path.rsplit("/", 1)[1])
             if request.method == "DELETE":
@@ -122,6 +134,9 @@ def setup(db, monkeypatch):
     app = FastAPI()
     app.include_router(recruitment.router, prefix="/api")
     app.include_router(recruitment.webhook_router, prefix="/api")
+    app.include_router(workspaces.router, prefix="/api")
+    app.include_router(workspaces.scoped_router, prefix="/api")
+    app.include_router(company_auth.router, prefix="/api")
     app.include_router(pages.router)
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[recruitment.provider_client] = lambda: remote
@@ -265,7 +280,7 @@ def test_provider_failure_is_not_an_interview_refusal(setup):
 
 
 @pytest.mark.parametrize("invalid", [None, {}, analysis(do_not_contact="false"), analysis(interest="probably")])
-def test_missing_or_invalid_analysis_remains_review_work_and_blocks_redial(setup, invalid):
+def test_authoritative_completed_call_releases_contact_but_keeps_analysis_for_review(setup, invalid):
     client, provider, _ = setup
     cid, lead = campaign_and_lead(client)
     _, request_id = dial(client, cid, lead)
@@ -273,8 +288,11 @@ def test_missing_or_invalid_analysis_remains_review_work_and_blocks_redial(setup
     response = client.post(BASE + f"/calls/{request_id}/sync", headers=AUTH).json()
     assert response["status"] == "completed"
     assert response["result_state"] == "needs_review" and response["result"] is None
-    assert response["outstanding"] is True
-    assert dial(client, cid, lead)[0].status_code == 409
+    assert response["outstanding"] is False
+    assert provider.executions == 1  # Synchronizing never redials automatically.
+    second, new_id = dial(client, cid, lead)
+    assert second.status_code == 202 and new_id != request_id
+    assert provider.executions == 2
     # A later authoritative corrected result can complete local processing.
     provider.complete(request_id, analysis())
     assert client.post(BASE + f"/calls/{request_id}/sync", headers=AUTH).json()["result_state"] == "ready"
@@ -287,6 +305,8 @@ def test_terminal_webhook_without_analysis_is_recovered_by_background_poll(setup
     complete = provider.complete(request_id, analysis())
     assert signed_event(client, {**complete, "result": {}}).status_code == 200
     assert db.get(RecruitmentCall, request_id).result_state == "pending"
+    assert db.get(RecruitmentCall, request_id).active_lead_id is not None
+    assert dial(client, cid, lead)[0].status_code == 409
     service.reconcile(db, remote)
     assert db.get(RecruitmentCall, request_id).result_state == "ready"
     assert provider.executions == 1
@@ -444,3 +464,192 @@ def test_unknown_prompt_variables_and_nonconsenting_contact_are_rejected(setup):
     response = client.post(BASE + f"/campaigns/{cid}/leads", headers=AUTH, json={
         "phone_number": "+251900000003", "contact_source": "test", "contact_permission": False})
     assert response.status_code == 400
+
+@pytest.mark.parametrize('gateways, expected, online', [
+    ([{'status': 'idle'}], 'ready', 1),
+    ([{'status': 'busy'}], 'busy', 1),
+    ([{'status': 'offline'}], 'offline', 0),
+    ([], 'offline', 0),
+])
+def test_connection_checks_actual_tenant_phone_status(setup, gateways, expected, online):
+    client, provider, _ = setup
+    provider.gateways = gateways
+    response = client.get(BASE + '/connection', headers=AUTH)
+    assert response.status_code == 200
+    assert response.json()['status'] == expected
+    assert response.json()['gateway_count'] == online
+    assert response.json()['voices'] == ['Kore', 'Puck']
+    assert response.json()['default_voice'] == 'Kore'
+    assert client.get(BASE + '/connection').status_code == 401
+
+
+def test_custom_greeting_and_language_are_prepared_for_the_exact_revision(setup):
+    client, provider, _ = setup
+    config = client.get(BASE + '/defaults', headers=AUTH).json()['config']
+    config.update(greeting='Greet Henok, offer a language choice, and wait.', language='Amharic', voice='Puck')
+    current = client.post(BASE + '/campaigns', json=config, headers=AUTH).json()
+    response = client.post(BASE + '/campaigns/' + current['campaign_id'] + '/prepare', headers=AUTH)
+    assert response.status_code == 200
+    assert provider.definition['greeting'] == config['greeting']
+    assert provider.definition['language'] == 'Amharic'
+    assert provider.definition['voice'] == 'Puck'
+    assert provider.executions == 0
+
+def test_analysis_retry_recovers_saved_completed_call_without_dialing(setup):
+    client, provider, _ = setup
+    cid, lead = campaign_and_lead(client)
+    _, request_id = dial(client,cid,lead)
+    provider.complete(request_id,None)
+    client.post(BASE+f'/calls/{request_id}/sync',headers=AUTH)
+    response = client.post(BASE+f'/calls/{request_id}/analysis/retry',headers=AUTH)
+    assert response.status_code==200
+    assert response.json()['result_state']=='ready'
+    assert provider.executions==1 and provider.analysis_retries==1
+    assert client.post(BASE+f'/calls/{request_id}/analysis/retry',headers=AUTH).status_code==200
+    assert provider.analysis_retries==1
+
+
+def test_analysis_retry_cannot_reprocess_an_active_call(setup):
+    client, provider, _ = setup
+    cid, lead = campaign_and_lead(client)
+    _, request_id = dial(client,cid,lead)
+    response=client.post(BASE+f'/calls/{request_id}/analysis/retry',headers=AUTH)
+    assert response.status_code==409
+    assert provider.executions==1 and provider.analysis_retries==0
+
+
+def excel_bytes(rows):
+    book = Workbook()
+    for row in rows:
+        book.active.append(row)
+    output = BytesIO()
+    book.save(output)
+    book.close()
+    return output.getvalue()
+
+
+def test_excel_preview_normalizes_and_import_persists_without_dialing(setup, db):
+    client, provider, _ = setup
+    cid, _ = campaign_and_lead(client)
+    data = excel_bytes([
+        ['Name', 'Phone number'], ['ቤዛዊት', '0911 222 333'],
+        ['Duplicate', '+251911222333'], ['Already saved', '+251900000001'],
+        ['Numeric local', 712345678], ['Bad', 'not a number'],
+        ['Formula', '=123456789'],
+    ])
+    path = BASE + f'/campaigns/{cid}/leads/import'
+    response = client.post(path + '/preview', headers=AUTH, content=data)
+    assert response.status_code == 200, response.text
+    preview = response.json()
+    assert preview['valid'] == 2
+    assert [r['status'] for r in preview['rows']] == ['valid', 'duplicate', 'duplicate', 'valid', 'invalid', 'invalid']
+    assert preview['rows'][0]['phone_number'] == '+251911222333'
+    assert preview['rows'][3]['phone_number'] == '+251712345678'
+    assert len(db.scalars(select(RecruitmentLead)).all()) == 1  # Preview is read-only.
+    payload = {'contacts': [{k: row[k] for k in ('name', 'phone_number')}
+                            for row in preview['rows'] if row['status'] == 'valid'],
+               'contact_source': 'Consented demo spreadsheet', 'contact_permission': False}
+    assert client.post(path, headers=AUTH, json=payload).status_code == 400
+    payload['contact_permission'] = True
+    assert client.post(path, headers=AUTH, json=payload).json() == {'imported': 2, 'skipped': 0}
+    assert client.post(path, headers=AUTH, json=payload).json() == {'imported': 0, 'skipped': 2}
+    db.expire_all()
+    leads = client.get(BASE + f'/campaigns/{cid}', headers=AUTH).json()['leads']
+    assert len(leads) == 3 and any(row['name'] == 'ቤዛዊት' for row in leads)
+    assert provider.submissions == 0
+    assert client.post(path + '/preview', content=data).status_code == 401
+
+
+def test_excel_import_rechecks_do_not_contact_after_preview(setup, db):
+    client, provider, _ = setup
+    cid, _ = campaign_and_lead(client)
+    other_cid, other_lead = campaign_and_lead(client, phone='+251911222333')
+    assert other_cid != cid
+    path = BASE + f'/campaigns/{cid}/leads/import'
+    sheet = excel_bytes([['name', 'phone_number'], ['Other', '0911222333']])
+    assert client.post(path + '/preview', headers=AUTH, content=sheet).json()['valid'] == 1
+    db.get(RecruitmentLead, other_lead).do_not_contact = True
+    db.commit()
+    result = client.post(path, headers=AUTH, json={
+        'contacts': [{'name': 'Other', 'phone_number': '+251911222333'}],
+        'contact_source': 'Test list', 'contact_permission': True,
+    })
+    assert result.json() == {'imported': 0, 'skipped': 1}
+    assert client.post(path + '/preview', headers=AUTH, content=sheet).json()['rows'][0]['status'] == 'blocked'
+    assert provider.submissions == 0
+
+
+@pytest.mark.parametrize('rows', [
+    [['Wrong', 'Headers'], ['Someone', '0911222333']],
+    [['Name', 'Phone number']],
+    [['Name', 'Phone', 'Phone number'], ['Someone', '0911222333', '0911222333']],
+    [['Name', 'Phone number']] + [['Person', '0911222333']] * 1001,
+])
+def test_excel_rejects_bad_headers_empty_and_excess_rows(setup, rows):
+    client, _, _ = setup
+    cid = client.post(BASE + '/campaigns', headers=AUTH, json={}).json()['campaign_id']
+    response = client.post(BASE + f'/campaigns/{cid}/leads/import/preview', headers=AUTH, content=excel_bytes(rows))
+    assert response.status_code == 400, response.text
+
+
+def test_excel_rejects_non_excel_and_oversized_upload(setup):
+    client, _, _ = setup
+    cid = client.post(BASE + '/campaigns', headers=AUTH, json={}).json()['campaign_id']
+    path = BASE + f'/campaigns/{cid}/leads/import/preview'
+    assert client.post(path, headers=AUTH, content=b'not an Excel file').status_code == 400
+    assert client.post(path, headers=AUTH, content=b'x' * (2 * 1024 * 1024 + 1)).status_code == 413
+
+
+def test_archived_campaigns_hide_without_deleting_history_and_cannot_dial(setup, db):
+    from app.models.recruitment import RecruitmentCampaign
+    client, provider, _ = setup
+    cid, lead = campaign_and_lead(client)
+    campaign = db.get(RecruitmentCampaign, cid)
+    campaign.archived = True
+    db.commit()
+    assert client.get(BASE + '/campaigns', headers=AUTH).json()['campaigns'] == []
+    saved = client.get(BASE + '/campaigns?include_archived=true', headers=AUTH).json()['campaigns']
+    assert len(saved) == 1 and saved[0]['archived'] is True
+    assert len(client.get(BASE + f'/campaigns/{cid}', headers=AUTH).json()['leads']) == 1
+    response, _ = dial(client, cid, lead)
+    assert response.status_code == 409
+    assert provider.submissions == 0
+
+
+def test_standard_prompt_uses_all_campaign_parameters(setup):
+    import re
+    from pathlib import Path
+    from app.schemas.recruitment import VARIABLES
+    client, provider, _ = setup
+    prompt = Path('demo/besingularity/standard-prompt.md').read_text()
+    assert set(re.findall(r'{{(\w+)}}', prompt)) == VARIABLES
+    assert all(name not in prompt for name in ('Henok', 'ሄኖክ', 'Bezawit', 'ቤዛዊት'))
+    campaign = client.post(BASE + '/campaigns', headers=AUTH, json={
+        'name': 'Standard recruitment', 'prompt': prompt,
+        'greeting': 'ሰላም {{recipient_name}}፣ ጤና ይስጥልኝ።',
+    }).json()
+    cid = campaign['campaign_id']
+    assert client.post(BASE + f'/campaigns/{cid}/prepare', headers=AUTH).status_code == 200
+    lead = client.post(BASE + f'/campaigns/{cid}/leads', headers=AUTH, json={
+        'name': 'New recipient', 'phone_number': '+251900000002',
+        'contact_source': 'Permitted spreadsheet', 'contact_permission': True,
+    }).json()['lead_id']
+    response, request_id = dial(client, cid, lead)
+    assert response.status_code == 202
+    sent = provider.bodies['proofcall-recruitment:' + request_id]
+    assert sent['variables']['recipient_name'] == 'New recipient'
+    assert sent['variables']['contact_source'] == 'Permitted spreadsheet'
+    assert provider.definition['greeting'] == 'ሰላም {{recipient_name}}፣ ጤና ይስጥልኝ።'
+
+
+def test_campaign_archive_schema_upgrade_preserves_existing_rows(engine, monkeypatch):
+    from sqlalchemy import text
+    from app.db import session
+    with engine.begin() as connection:
+        connection.execute(text('ALTER TABLE recruitment_campaigns DROP COLUMN archived'))
+        connection.execute(text("INSERT INTO recruitment_campaigns (campaign_id, revision, config, created_at) VALUES ('legacy', 1, '{}', '2026-11-25')"))
+    monkeypatch.setattr(session, 'engine', engine)
+    session._upgrade_legacy_sqlite_schema()
+    session._upgrade_legacy_sqlite_schema()
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT archived FROM recruitment_campaigns WHERE campaign_id='legacy'")).scalar_one() == 0

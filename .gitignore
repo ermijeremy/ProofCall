@@ -2,6 +2,7 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .venv/
+.venv
 *.db
 *.db-journal
 
@@ -12,3 +13,6 @@ data/callwise_responses/*.json
 .env
 .env.*
 !.env.example
+
+# Private company onboarding credentials.
+.company-credentials/

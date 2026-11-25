@@ -16,5 +16,9 @@
 .demo-call-card dt { font-weight: 600; margin-top: 10px; }
 .demo-call-card dd { margin-left: 0; white-space: pre-wrap; }
 .demo-access { max-width: 560px; }
+#demo-import-results { max-height: 320px; overflow: auto; }
+#demo-import-results table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+#demo-import-results th, #demo-import-results td { text-align: left; padding: 8px; border-bottom: 1px solid #e2e8f0; overflow-wrap: anywhere; }
+#demo-import-results th { position: sticky; top: 0; background: #fff; }
 .recruitment-app button:disabled { opacity: .5; cursor: not-allowed; }
 @media (max-width: 850px) { .demo-grid, .demo-sessions { grid-template-columns: 1fr; } }

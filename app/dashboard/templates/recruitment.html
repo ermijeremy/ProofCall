@@ -1,14 +1,14 @@
 {% extends "base.html" %}
-{% block title %}BeSingularity recruitment · ProofCall{% endblock %}
+{% block title %}Company campaigns · ProofCall{% endblock %}
 {% block chrome %}
-<header class="page-head"><a class="back-link" href="/">← ProofCall</a><div><h1>BeSingularity recruitment</h1><p class="muted">Invite a contact to sales training and record their response.</p></div></header>
+<header class="page-head"><a class="back-link" href="{{ '/login' if company_id else '/' }}">ProofCall</a><div><h1 id="workspace-title">Company campaigns</h1><p class="muted">Configure your call script, questions, contacts and results.</p></div>{% if company_id %}<a href="/login?change=1">Change password</a><button id="company-logout" type="button" class="ghost-button">Sign out</button>{% endif %}</header>
 {% endblock %}
 {% block content %}
 <link rel="stylesheet" href="/static/recruitment.css">
-<div class="recruitment-app">
+<div class="recruitment-app" id="company-workspace" data-company-id="{{ company_id|default('') }}">
   <p class="demo-banner">Sample settings are provided for rehearsal. Review the prompt, location, date, session times and contact source before placing a call.</p>
   <p id="demo-notice" role="status" aria-live="polite" hidden></p>
-  <form id="demo-access" class="round-panel demo-access">
+  <form id="demo-access" class="round-panel demo-access" {% if company_id %}hidden{% endif %}>
     <label for="demo-token">Operator access token</label>
     <input id="demo-token" type="password" autocomplete="off" required placeholder="Enter the token configured for this demo">
     <button class="primary-button" type="submit">Open workspace</button>
@@ -17,15 +17,22 @@
   <div id="demo-workspace" hidden>
     <section class="round-panel demo-toolbar">
       <label>Campaign <select id="demo-campaign"></select></label>
+      <label class="demo-check"><input id="demo-show-archived" type="checkbox"> Show archived campaigns</label>
       <button id="demo-new" class="ghost-button" type="button">New campaign</button>
       <button id="demo-lock" class="ghost-button" type="button">Lock workspace</button>
       <p id="demo-connection" class="muted"></p>
+      <button id="demo-refresh-connection" class="ghost-button" type="button">Check phone connection</button>
     </section>
     <div class="demo-grid">
       <section class="round-panel">
-        <h2>1. Prepare the invitation</h2>
+        <h2>1. Configure the campaign</h2>
         <form id="demo-config">
           <label>Campaign name <input name="name" required maxlength="200"></label>
+          <label>Company name <input name="company_name" required maxlength="255"></label>
+          <label>Call purpose <select name="purpose"><option value="questionnaire">Company questionnaire</option><option value="recruitment">Sales recruitment invitation</option></select></label>
+          <label id="questionnaire-editor">Your questions (one per line) <textarea id="campaign-questions" rows="7" placeholder="How was your experience with our service?&#10;What should we improve?"></textarea></label>
+          <p id="questionnaire-help" class="muted">Up to 20 questions, 500 characters each. The agent asks them one at a time; results show the answer, evidence and whether it was stated, unclear, refused or not asked. Save and prepare after editing.</p>
+          <div id="recruitment-settings">
           <label>Training location <input name="training_location" required maxlength="500"></label>
           <label>Training date (Gregorian) <input name="training_date" type="date" required></label>
           <div class="demo-sessions">
@@ -35,6 +42,12 @@
           <label>Clock convention <select name="clock_convention"><option value="24h">24-hour time</option><option value="ethiopian">Ethiopian clock</option></select></label>
           <p class="muted">Timezone: Africa/Addis_Ababa. State morning/afternoon clearly in the session wording.</p>
           <label>Default contact-source wording <input name="contact_source" required maxlength="500"></label>
+          </div>
+          <label id="generic-source-label" hidden>Default contact source <input id="generic-contact-source" maxlength="500"></label>
+          <label>Opening message <textarea name="greeting" rows="4" minlength="10" maxlength="2000" required></textarea></label>
+          <label>Language behavior <select name="language"><option value="Amharic">Start in Amharic; honor the chosen language</option><option value="Auto">Detect language from the caller's speech</option></select></label>
+          <label>Agent voice <select name="voice"><option value="">Server default</option></select></label>
+          <p class="muted">Voices come from TeleExpert. Save and prepare again after changing the voice; existing calls keep their previous voice.</p>
           <label>Conversation prompt <textarea name="prompt" rows="18" minlength="50" maxlength="10000" required></textarea></label>
           <p class="muted">Editable variables: <code>{% raw %}{{recipient_name}}, {{contact_source}}, {{training_location}}, {{training_date}}, {{session_one}}, {{session_two}}, {{clock_convention}}, {{timezone}}{% endraw %}</code>.</p>
           <button class="primary-button" type="submit">Save campaign</button>
@@ -44,6 +57,19 @@
       </section>
       <section class="round-panel">
         <h2>2. Choose a contact</h2>
+        <form id="demo-import">
+          <h3>Import from Excel</h3>
+          <label>Contact spreadsheet <input id="demo-import-file" type="file" accept=".xlsx" required></label>
+          <p class="muted">Use Name and Phone number headers on the first worksheet. Accepts +country-code numbers and Ethiopian 09… / 07… numbers. Maximum 1,000 rows, 2 MB. Save older .xls files as .xlsx first.</p>
+          <a href="/static/recruitment-contacts-template.xlsx" download>Download Excel template</a>
+          <label>Contact source for this list <input id="demo-import-source" required maxlength="500"></label>
+          <button id="demo-import-preview" class="ghost-button" type="submit">Preview spreadsheet</button>
+          <div id="demo-import-results" aria-live="polite"></div>
+          <label class="demo-check"><input id="demo-import-permission" type="checkbox"> I have permission to call all contacts I am importing.</label>
+          <button id="demo-import-confirm" class="ghost-button" type="button" disabled>Import valid contacts</button>
+          <p class="muted">Import adds contacts only. Select a contact and confirm each call separately.</p>
+        </form>
+        <h3>Or add one contact</h3>
         <form id="demo-lead">
           <label>Name (optional) <input name="name" maxlength="255"></label>
           <label>Phone number <input name="phone_number" type="tel" placeholder="+251…" required pattern="\+[1-9][0-9]{6,14}"></label>
@@ -52,11 +78,12 @@
           <button class="ghost-button" type="submit">Add contact</button>
         </form>
         <div id="demo-leads"></div>
-        <button id="demo-call" class="primary-button" type="button" disabled>Review and place one call</button>
+        <button id="demo-call" class="primary-button" type="button" aria-describedby="demo-call-reason" disabled>Review and place one call</button>
+        <p id="demo-call-reason" role="status" aria-live="polite" class="muted"></p>
         <p class="muted">This places a real phone call through TeleExpert. There are no automatic redials. Requested callbacks are recorded for a person to arrange.</p>
       </section>
     </div>
-    <section class="round-panel"><h2>3. Call progress and results</h2><p class="muted">Attendance is an intention, not confirmed registration. AI-reported results need operator review before follow-up.</p><div id="demo-calls"></div></section>
+    <section class="round-panel"><h2>3. Call progress and results</h2><p class="muted">Review AI-reported answers and supporting evidence before follow-up. Call completion does not mean every question was answered.</p><div id="demo-calls"></div></section>
   </div>
 </div>
 {% endblock %}
